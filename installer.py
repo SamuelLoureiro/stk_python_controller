@@ -10,7 +10,7 @@ Ce qu'il fait, dans l'ordre :
   2. telecharge le modele de voix Vosk (~40 Mo) dans models/, s'il manque ;
   3. essaie de creer la manette virtuelle (Windows) : sans elle, on joue
      avec --fleches ;
-  4. verifie les calculs de la chaise (faux_chaise.py --verifier).
+  4. verifie les calculs de la chaise, si l'outil de test faux_chaise.py est la.
 
 Il ne modifie rien d'autre que le dossier models/, et peut etre relance sans
 risque : ce qui est deja fait est saute.
@@ -117,7 +117,12 @@ def verifier_manette():
 def verifier_calculs():
     print()
     print('4. Calculs de la chaise')
-    import faux_chaise
+    try:
+        import faux_chaise
+    except ImportError:
+        # L'outil de test n'est pas dans le depot : rien a verifier ici.
+        print('  (faux_chaise.py absent : verification sautee)')
+        return True
     import contextlib
     import io
     tampon = io.StringIO()
@@ -141,7 +146,7 @@ def main():
     problemes = [texte for ok, texte in bilan if not ok]
     print()
     if not problemes:
-        print('Tout est pret. Suite : GUIDE.md, section 2 (tester sans materiel).')
+        print('Tout est pret. Pour jouer seul : .\\lancer.ps1 --solo')
     else:
         print('%d point(s) a regler :' % len(problemes))
         for texte in problemes:

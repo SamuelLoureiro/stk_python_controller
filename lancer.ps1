@@ -53,7 +53,12 @@ if ($Role -eq 'serveur') {
     Set-Location $TRIO
     if ($Muet) {
         $host.UI.RawUI.WindowTitle = 'SERVEUR MUET (aucune touche tapee)'
-        & $Py (Join-Path $TRIO 'serveur_muet.py')
+        $muet = Join-Path $TRIO 'serveur_muet.py'
+        if (-not (Test-Path $muet)) {
+            Write-Host "serveur_muet.py absent (outil de test, hors du depot)." -ForegroundColor Red
+            return
+        }
+        & $Py $muet
     } else {
         $host.UI.RawUI.WindowTitle = 'SERVEUR STK (manette + clavier)'
         & $Py (Join-Path $TRIO 'serveur.py') -d

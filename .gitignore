@@ -10,3 +10,18 @@ venv/
 # Journaux de parties (trio.py --journal) : a garder pour soi
 journaux/
 *.csv
+
+# Outils de test et de mise au point : gardes en local, hors du depot
+faux_chaise.py
+faux_arduino.py
+tester_voix.py
+analyser.py
+relacher.py
+bouger_stick.py
+serveur_muet.py
+stk_fenetre.ps1
+
+# Documentation : en local pour l'instant
+README.md
+GUIDE.md
+CONCEPTION.md
