@@ -1,0 +1,3 @@
+evdev>=2.0.0
+oscpy>=0.6.0
+pynput>=1.8.2

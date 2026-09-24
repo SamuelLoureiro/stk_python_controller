@@ -221,6 +221,7 @@ def main():
 
     print()
     print('Roles actifs : %s' % ', '.join(nom for nom, _ in roles))
+    print('  * Arduino (drift.ino) : Pret a recevoir le drift en Wi-Fi (UDP :%d)' % cfg.PORT_ARDUINO_DRIFT)
     if not args.simulation:
         print('Passe sur SuperTuxKart EN MODE FENETRE et clique dedans : les touches')
         print('partent dans la fenetre qui a le focus.')

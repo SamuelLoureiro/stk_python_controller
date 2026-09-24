@@ -72,6 +72,12 @@ MOTS_VOIX = {
 DELAI_VOIX = 0.5                    # s avant qu'une meme expression puisse redeclencher
 MICRO = None                        # numero du micro, None = celui de Windows
 
+# --- Arduino (Drift / Derrapagem) -----------------------------------------
+# L'Arduino (drift.ino) envoie P_SKIDDING / R_SKIDDING directement en Wi-Fi UDP
+# sur le port du serveur (6006). Touche 'v' dans SuperTuxKart.
+PORT_ARDUINO_DRIFT = 6006
+
 # --- Affichage ----------------------------------------------------------
 PERIODE_BOUCLE = 1 / 60
 PERIODE_ETAT = 0.5
+
