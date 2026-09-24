@@ -1,0 +1,12 @@
+# Le modele de voix (~40 Mo) se telecharge avec : python installer.py
+models/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Journaux de parties (trio.py --journal) : a garder pour soi
+journaux/
+*.csv
