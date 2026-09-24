@@ -4,6 +4,11 @@
     mains sur la tete (panique)          -> freiner
     geste 6-7 (mains en alternance)      -> accelerer
     deux mains levees = accelerer, une seule = freiner, aucune = rien.
+    high five entre la personne debout et le joueur assis -> fire
+
+Le high five : une main levee du joueur assis (au-dessus de son epaule) et
+une main de la personne debout se rejoignent a l'image. La webcam ne voit pas
+la profondeur : des mains l'une devant l'autre comptent aussi.
 
 Le 6-7 : les deux mains devant soi, sous les epaules, qui montent et
 descendent en alternance. d = (hauteur main G - hauteur main D) / largeur
@@ -48,6 +53,27 @@ def hauteurs_mains(pose, largeur, hauteur):
         else:
             resultat.append((pose[epaule][1] - pose[poignet][1]) * hauteur / epaules)
     return resultat
+
+
+def personne_assise(poses, debout):
+    """Le joueur sur la chaise : l'autre pose, celle dont le nez est le plus bas."""
+    autres = [p for p in poses if p is not debout]
+    return max(autres, key=lambda p: p[NEZ][1]) if autres else None
+
+
+def distance_high_five(debout, assise, largeur, hauteur):
+    """Plus petite distance entre une main levee du joueur assis et une main de
+    la personne debout, en largeurs d'epaules de la personne debout. None si le
+    joueur assis n'a pas de main levee."""
+    epaules = abs(debout[EPAULE_G][0] - debout[EPAULE_D][0]) * largeur or 1.0
+    levees = [assise[p] for p, h in zip((POIGNET_G, POIGNET_D),
+                                        hauteurs_mains(assise, largeur, hauteur))
+              if h is not None and h > cfg.MARGE_MAIN]
+    mains = [debout[p] for p in (POIGNET_G, POIGNET_D) if debout[p][2] >= cfg.VISIBILITE_MIN]
+    if not levees or not mains:
+        return None
+    return min(math.hypot((a[0] - b[0]) * largeur, (a[1] - b[1]) * hauteur)
+               for a in levees for b in mains) / epaules
 
 
 def distance_tete(pose, poignet, largeur, hauteur):
@@ -161,6 +187,10 @@ class Webcam:
         self._arret = threading.Event()
         self._filtre = Filtre()
         self._sixsept = SixSept()
+        self._tape = None           # distance du high five, pour le reglage
+        self._en_tape = False
+        self._tapes = 0             # high fives vus par le fil camera
+        self._tapes_envoyes = 0     # ... et deja transformes en fire
         self._image = None
         self._poses = []
         self._debout = None
@@ -216,10 +246,18 @@ class Webcam:
                 hauteur, largeur = image.shape[:2]
                 t = time.time()
                 geste, debout = analyser(poses, largeur, hauteur, self._sixsept, t)
+                assise = personne_assise(poses, debout) if debout else None
+                tape = distance_high_five(debout, assise, largeur, hauteur) if assise else None
+                en_tape = tape is not None and tape < cfg.HIGH_FIVE_DISTANCE
                 images += 1
                 with self._verrou:
                     self._image, self._poses, self._debout, self._brut = image, poses, debout, geste
-                    self._filtre.mettre(geste, t)
+                    self._tape = tape
+                    if en_tape and not self._en_tape:
+                        self._tapes += 1
+                    self._en_tape = en_tape
+                    # Le bras tendu pour taper ne doit pas freiner (une main levee).
+                    self._filtre.mettre(self._filtre.stable if en_tape else geste, t)
                     self._derniere = t
                     self._numero += 1
                     if t - debut >= 1.0:
@@ -238,6 +276,11 @@ class Webcam:
         if self.sortie is None:
             return
         g = self.geste()
+        with self._verrou:
+            nouveau = self._tapes != self._tapes_envoyes
+            self._tapes_envoyes = self._tapes
+        if nouveau:
+            self.sortie.pulse('fire', cfg.HIGH_FIVE_REPOS)
         with self.sortie.groupe():
             self.sortie.set_continuous('accelerate', NOM, g == 'accelerer')
             self.sortie.set_continuous('brake', NOM, g == 'freiner')
@@ -255,10 +298,13 @@ class Webcam:
     def detail_gestes(self):
         m = self.mesures()
         if m is None:
-            return '6-7 -  tete -'
+            return '6-7 -  tete -  tape -'
         _, _, d, tete = m
-        return '6-7 d=%s  tete %s' % ('-' if d is None else '%+.2f' % d,
-                                     '-' if tete is None else '%.2f' % tete)
+        with self._verrou:
+            tape = self._tape
+        return '6-7 d=%s  tete %s  tape %s' % ('-' if d is None else '%+.2f' % d,
+                                              '-' if tete is None else '%.2f' % tete,
+                                              '-' if tape is None else '%.2f' % tape)
 
     def afficher(self):
         """Rafraichit la fenetre (fil principal). Renvoie la touche pressee, ou None."""

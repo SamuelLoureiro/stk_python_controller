@@ -74,6 +74,11 @@ SIXSEPT_MAINTIEN = 0.6              # s sans bascule -> on n'accelere plus
 FREIN_DISTANCE_TETE = 0.9           # monter si des mains bien posees ne freinent pas
 VISIBILITE_TETE = 0.3               # une main sur la tete est souvent a moitie cachee
 
+# High five joueur assis / personne debout -> fire. A regler avec webcam.py
+# ("tape") : distance entre les deux mains, en largeurs d'epaules.
+HIGH_FIVE_DISTANCE = 0.5            # monter si un vrai high five n'est pas reconnu
+HIGH_FIVE_REPOS = 1.0               # s minimum entre deux fire
+
 # --- Voix -----------------------------------------------------------------
 # Modele anglais : mots anglais. Une expression de plusieurs mots est
 # reconnue comme un tout.

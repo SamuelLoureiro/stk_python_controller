@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Le jeu a trois : le joueur assis braque avec la chaise, la personne debout
-derriere lui regle la vitesse avec ses mains (webcam), et la voix lance les objets.
+derriere lui regle la vitesse avec ses mains (webcam), un high five entre les
+deux lance un objet, et la voix aussi.
 
     python trio.py                  chaise + webcam + voix
     python trio.py --solo           sans personne debout : le kart accelere tout seul
