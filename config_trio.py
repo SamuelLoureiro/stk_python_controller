@@ -46,7 +46,8 @@ ANGLE_MAXI = 35.0                   # deg, braquage complet (~80 % de l'angle co
 COURBE = 1.5                        # > 1 : plus doux pres du neutre
 
 # --- Webcam : la personne debout ----------------------------------------
-# Deux mains levees = accelerer, une seule = freiner, aucune = rien.
+# Mains sur la tete = freiner, geste 6-7 = accelerer, et sinon :
+# deux mains levees = accelerer, une seule = freiner, aucune = rien.
 ACCELERATION = 'webcam'             # ou 'automatique' (--solo, --auto)
 CAMERA_INDEX = 0
 CAMERA_LARGEUR = 640
@@ -60,6 +61,18 @@ MARGE_MAIN = 0.2                    # poignet au-dessus de l'epaule, en largeurs
 VISIBILITE_MIN = 0.5
 ATTENTE_GESTE = 0.2                 # s : lever les deux mains passe par "une main"
 ABSENCE_MAX = 0.5                   # s sans personne debout -> tout relache
+
+# Geste 6-7, a regler avec webcam.py ("6-7 d=") : pendant le geste d doit
+# passer nettement de +SEUIL a -SEUIL, au repos rester entre les deux.
+SIXSEPT_SEUIL = 0.15                # largeurs d'epaules ; monter si une main qui bouge suffit
+SIXSEPT_FENETRE = 1.5               # s dans lesquelles on compte les bascules
+SIXSEPT_BASCULES = 3                # bascules necessaires (un aller-retour et demi)
+SIXSEPT_MAINTIEN = 0.6              # s sans bascule -> on n'accelere plus
+
+# Mains sur la tete, a regler avec webcam.py ("tete") : distance de la main la
+# plus eloignee au centre de la tete, en largeurs d'epaules.
+FREIN_DISTANCE_TETE = 0.9           # monter si des mains bien posees ne freinent pas
+VISIBILITE_TETE = 0.3               # une main sur la tete est souvent a moitie cachee
 
 # --- Voix -----------------------------------------------------------------
 # Modele anglais : mots anglais. Une expression de plusieurs mots est
