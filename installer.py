@@ -12,8 +12,7 @@ Ce qu'il fait, dans l'ordre :
      avec --fleches ;
   4. verifie les calculs de la chaise, si l'outil de test faux_chaise.py est la.
 
-Il ne modifie rien d'autre que le dossier models/, et peut etre relance sans
-risque : ce qui est deja fait est saute.
+Relancable sans risque : ce qui est deja fait est saute.
 """
 
 import importlib
@@ -120,7 +119,6 @@ def verifier_calculs():
     try:
         import faux_chaise
     except ImportError:
-        # L'outil de test n'est pas dans le depot : rien a verifier ici.
         print('  (faux_chaise.py absent : verification sautee)')
         return True
     import contextlib

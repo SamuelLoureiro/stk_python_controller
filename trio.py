@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
-"""Le jeu a trois : l'aveugle braque avec sa chaise, le muet le guide, le sourd
-tient la vitesse et les objets.
+"""Le jeu a trois : l'aveugle braque avec sa chaise, le muet le guide par gestes,
+le sourd tient la vitesse et les objets.
 
-    python trio.py                       tout ce qui peut demarrer
-    python trio.py --aveugle             la chaise seule
-    python trio.py --arduino --voix      le sourd seul
-    python trio.py --simulation          affiche les commandes sans les envoyer
-    python trio.py --journal course1.csv enregistre la partie pour l'evaluation
-    python trio.py --duree 180           s'arrete seul au bout de 3 minutes
-    python trio.py --solo                tester seul, assis face a l'ecran (GUIDE.md)
+    python trio.py                  tout ce qui peut demarrer
+    python trio.py --solo           seul, face a l'ecran, acceleration automatique
+    python trio.py --aveugle        la chaise seule (--voix, --arduino : idem)
+    python trio.py --fleches        si le jeu ignore la manette virtuelle
+    python trio.py --simulation     affiche les commandes sans les envoyer
+    python trio.py --journal partie.csv --duree 180
 
-La chaine
----------
-    telephone sous la chaise --OSC:8000--.
-    boitier Arduino ---------UDP:6010---->  trio.py --UDP:6006--> serveur.py --> STK
-    micro (Vosk) -------------------------'                        (clavier + manette virtuelle)
-
-Le serveur doit etre serveur.py (ce dossier) : c'est lui qui comprend STEER, la
-direction analogique. Le plus simple : .\\lancer.ps1, qui ouvre les deux
-fenetres.
-
-Le muet n'a aucune entree dans le systeme : il guide l'aveugle par gestes.
-C'est voulu -- voir CONCEPTION.md.
-
-Pendant la partie, dans ce terminal : C recentre la chaise (l'aveugle doit
-etre face au muet), Q quitte. Ou dire "center".
+Le serveur (serveur.py) doit tourner : .\\lancer.ps1 ouvre les deux fenetres.
+Pendant la partie : C recentre la chaise (ou dire "center"), Q quitte.
 """
 
 import argparse
@@ -60,9 +46,7 @@ def touche():
 
 
 class Journal:
-    """CSV de la partie, pour l'evaluation : une ligne d'etat par tour de
-    boucle, une ligne par commande envoyee. Assez pour compter apres coup les
-    inversions de braquage, les sauvetages, le temps passe en demi-tour..."""
+    """CSV de la partie : une ligne d'etat par tour de boucle, une par commande."""
 
     def __init__(self, chemin):
         dossier = os.path.dirname(chemin)
@@ -185,7 +169,6 @@ def lire_arguments():
 def main():
     args = lire_arguments()
 
-    # Les options priment sur config_trio.py, le temps de la session.
     if args.micro is not None:
         cfg.MICRO = args.micro
     if args.auto:
@@ -197,9 +180,6 @@ def main():
     if args.fleches:
         cfg.DIRECTION = 'fleches'
     if args.solo:
-        # Seul et face a l'ecran : pas de miroir (tourner a droite = kart a
-        # droite), personne pour accelerer, et regarder l'ecran n'est plus de
-        # la triche. --correspondance reste prioritaire si on le donne aussi.
         cfg.CORRESPONDANCE = args.correspondance or 'egocentrique'
         cfg.ACCELERATION = 'automatique'
         cfg.ANGLE_DEMI_TOUR = None
@@ -315,8 +295,6 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # Filet de securite : sans lui, un Ctrl+C en plein virage laisse l'axe
-        # de la manette braque et la fleche enfoncee, y compris apres fermeture.
         for nom, role in roles:
             try:
                 role.arreter()

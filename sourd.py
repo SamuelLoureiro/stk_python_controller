@@ -1,39 +1,8 @@
 #!/usr/bin/env python3
-"""Le sourd : casque sur les oreilles, il tient la vitesse et gere les objets.
+"""Le sourd : la voix (Vosk) et le boitier Arduino.
 
-    boitier Arduino (UDP 6010)   doigt pose     -> accelerer (tenu)
-                                 tape (piezo)   -> lancer l'objet
-                                 pedale (ultrason, en option) -> freiner
-    voix (Vosk)                  "fire"   -> lancer l'objet
-                                 "turbo"  -> nitro
-                                 "help"   -> sauvetage
-                                 "center" -> recentrer la chaise de l'aveugle
-
-Pourquoi un ecouteur Vosk ecrit ici
------------------------------------
-Le VoiceWorker des autres branches du depot change d'interface d'une branche
-a l'autre (sur main il recoit un objet, sur performance une fonction). Ce
-dossier doit tourner seul : quarante lignes ici valent mieux qu'une
-dependance vers une branche qui bouge.
-
-Les faux declenchements
------------------------
-Vosk ne reconnait QUE les mots de MOTS_VOIX : tout son est ramene vers le
-plus proche, y compris la musique du jeu et des paroles en francais. Pour une
-action couteuse comme le sauvetage, le mot doit donc etre dit DEUX FOIS
-(MOTS_A_REPETER). python tester_voix.py --mots montre ce que Vosk entend.
-
-Le boitier envoie un ETAT, pas des evenements
----------------------------------------------
-Toutes les 50 ms :  touche=1 dist=23 tapes=12 piezo=412
-
-  - un paquet perdu ne bloque rien : le suivant redit tout ;
-  - un tir part quand le COMPTEUR tapes augmente, pas sur un message "tape"
-    qui pourrait se perdre ou arriver deux fois ;
-  - si plus rien n'arrive pendant WATCHDOG_ARDUINO, on relache tout. C'est la
-    lecon du projet : le silence doit valoir relachement (ZIG SIM n'envoie
-    pas de "doigt leve", le drift.ino de l'equipe renvoie son relachement
-    trois fois).
+Le boitier envoie son ETAT toutes les 50 ms (touche=1 dist=23 tapes=12 piezo=412) :
+un tir part quand le compteur tapes augmente, et le silence vaut relachement.
 """
 
 import collections
@@ -48,8 +17,6 @@ import config_trio as cfg
 
 NOM_ARDUINO = 'arduino'
 
-# Compteurs du boitier -> action ponctuelle. Un capteur de plus sur la carte
-# (tilt switch, EMG...) = un compteur de plus dans le paquet et une ligne ici.
 COMPTEURS = {
     'tapes': 'fire',
     'nitros': 'turbo',
@@ -89,7 +56,7 @@ class VoixSourd(threading.Thread):
     def run(self):
         try:
             self._ecouter()
-        except Exception as erreur:     # le thread ne doit pas mourir en silence
+        except Exception as erreur:
             self.erreur = erreur
             print('        [voix] ARRETEE : %s' % erreur)
 
@@ -98,8 +65,7 @@ class VoixSourd(threading.Thread):
         import vosk
         vosk.SetLogLevel(-1)
         modele = vosk.Model(cfg.MODELE_VOSK)
-        # Grammaire restreinte : Vosk ne peut entendre QUE ces mots. "[unk]"
-        # absorbe tout le reste, sinon il forcerait chaque bruit vers un mot-cle.
+        # "[unk]" absorbe les sons hors liste.
         grammaire = json.dumps(list(cfg.MOTS_VOIX) + ['[unk]'])
         reconnaisseur = vosk.KaldiRecognizer(modele, 16000, grammaire)
         with sd.RawInputStream(samplerate=16000, blocksize=4000, dtype='int16',
@@ -120,15 +86,8 @@ class VoixSourd(threading.Thread):
         self._audio.put(bytes(indata))
 
     def _traiter(self, texte, final):
-        """Declenche chaque NOUVELLE occurrence d'un mot-cle dans la phrase en cours.
-
-        Vosk renvoie des resultats partiels qui s'allongent tant qu'on parle :
-        "fire" puis "fire [unk]" puis "fire [unk] fire". Declencher a chaque
-        partiel lancerait un objet par partiel ; un simple delai ne suffit pas
-        non plus (une phrase longue garde le meme "fire" plus d'une seconde).
-        On compte donc les occurrences deja traitees, et on remet a zero a la
-        fin de la phrase.
-        """
+        """Declenche chaque nouvelle occurrence d'un mot-cle dans la phrase : les
+        resultats partiels de Vosk s'allongent ("fire", "fire [unk] fire")."""
         compte = collections.Counter(m for m in texte.lower().split() if m in cfg.MOTS_VOIX)
         for mot, n in compte.items():
             deja = self._declenches.get(mot, 0)
@@ -141,17 +100,13 @@ class VoixSourd(threading.Thread):
 
     def _declencher(self, mot):
         maintenant = time.monotonic()
-        # Juste apres une action, une nouvelle occurrence est une revision de
-        # Vosk, pas une nouvelle demande.
+        # Juste apres une action : revision de Vosk, pas une nouvelle demande.
         if maintenant - self._dates.get(mot, 0.0) < cfg.DELAI_VOIX:
             return
 
         fenetre = cfg.MOTS_A_REPETER.get(mot)
         if fenetre is not None:
-            # Mot a repeter : la 1re occurrence arme, la 2e dans la fenetre
-            # agit. "help help" dit d'une traite compte aussi : les deux
-            # occurrences arrivent ensemble, et le delai ci-dessus ne s'applique
-            # qu'APRES une action.
+            # 1re occurrence : on arme. 2e dans la fenetre : on agit.
             arme = self._armes.get(mot)
             if arme is None or maintenant - arme > fenetre:
                 self._armes[mot] = maintenant
@@ -219,9 +174,7 @@ class ArduinoSourd:
                 donnees, adresse = self._sock.recvfrom(512)
             except (BlockingIOError, InterruptedError):
                 return
-            except OSError:
-                # Sous Windows, un ICMP "port injoignable" remonte en erreur
-                # sur le recvfrom suivant (WSAECONNRESET). Sans consequence.
+            except OSError:         # WSAECONNRESET sous Windows, sans consequence
                 return
             self._paquet(donnees.decode('ascii', 'replace'), adresse)
 
@@ -247,12 +200,10 @@ class ArduinoSourd:
                 continue
             valeur, avant = champs[nom], self._compteurs.get(nom)
             self._compteurs[nom] = valeur
-            # Premier paquet, ou carte redemarree (compteur revenu a zero) :
-            # on prend la valeur comme origine, sans rien declencher.
+            # premier paquet, ou carte redemarree
             if avant is None or valeur < avant:
                 continue
-            # Plafond a 3 : apres une longue coupure, on ne rattrape pas une
-            # rafale de tirs d'un coup.
+            # plafond : pas de rafale de tirs apres une coupure
             for _ in range(min(valeur - avant, 3)):
                 self.sortie.pulse(action)
 

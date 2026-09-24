@@ -1,58 +1,16 @@
 #!/usr/bin/env python3
-"""Serveur d'entree avec DIRECTION ANALOGIQUE, version Windows.
+"""Serveur d'entree : le seul programme qui touche au clavier et a la manette.
 
     python serveur.py -d          (-d : affiche chaque commande recue)
 
-C'est le SEUL programme qui touche au clavier et a la manette virtuelle :
-trio.py lui envoie des commandes texte sur le port UDP 6006, il les traduit.
-lancer.ps1 l'ouvre tout seul dans sa propre fenetre.
+Recoit sur UDP 6006 le vocabulaire du TP (P_LEFT, R_LEFT, FIRE...) plus
+STEER:<-1..+1>, envoye a l'axe d'une manette Xbox virtuelle (vgamepad +
+ViGEmBus). Sans vgamepad, STEER est traduit en fleches battues en rythme.
+Windows seulement ; sous Linux, STK_input_server_v2.py (branche performance).
 
-Jumeau de STK_input_server_v2.py ecrit par samuel sur la branche performance du
-depot de l'equipe. Meme port, meme vocabulaire, meme role -- seul le moyen de
-creer la manette virtuelle change :
+Lancer SuperTuxKart APRES ce serveur, qui cree la manette.
 
-    Linux   : evdev / uinput      (STK_input_server_v2.py, branche performance)
-    Windows : ViGEmBus / vgamepad (ce fichier)
-
-Sous Linux, la bibliotheque keyboard exige les droits root : utiliser plutot
-STK_input_server_v2.py, qui parle le meme vocabulaire (STEER compris).
-
-Pourquoi une manette et pas des fleches
----------------------------------------
-Une touche est enfoncee ou relachee : le kart braque a fond ou pas du tout. On
-peut moduler la touche (appuis rythmes, voir modulation.py) et ca aide
-beaucoup, mais ca reste une suite d'a-coups.
-
-Un axe de manette, lui, prend n'importe quelle valeur entre -1 et +1. Le jeu
-recoit une consigne continue et la direction devient fluide. C'est ce qui rend
-le mode performance de l'equipe agreable a jouer, et c'est reproductible ici.
-
-Le vocabulaire
---------------
-    STEER:<valeur>    direction analogique, de -1.0 (gauche) a +1.0 (droite)
-    P_ACCELERATE      ... et tout le vocabulaire clavier habituel, inchange
-
-Un client qui ne connait pas STEER continue donc de fonctionner tel quel.
-
-Si vgamepad n'est pas installe
-------------------------------
-Le serveur ne refuse pas de demarrer : il traduit les STEER en appuis modules
-sur les fleches. C'est moins fluide, mais le client n'a pas a le savoir et rien
-ne casse. Pour la vraie direction analogique :
-
-    pip install vgamepad
-
-Le pilote ViGEmBus doit etre installe : l'installation de vgamepad le propose.
-
-Configuration du jeu
---------------------
-Lancer SuperTuxKart APRES ce serveur, qui cree la manette. Normalement le
-stick gauche est deja assigne a la direction ; sinon, Options > Controles :
-assigner UNIQUEMENT "tourner a gauche / a droite" a l'axe du Xbox 360
-Controller, et laisser tout le reste au clavier (GUIDE.md, 6.5).
-
-Original : STK_input_server.py, Michael ORTEGA - 09 jan 2018. Modifie : appui
-de 50 ms pour les commandes breves, direction analogique STEER.
+D'apres STK_input_server.py, Michael ORTEGA, 2018.
 """
 
 import socket
@@ -70,10 +28,8 @@ BLEU = '\033[94m'
 
 ADRESSE = ('localhost', 6006)
 
-# Appui bref mais NON NUL. Mesure du projet : un appui de 8 ms n'est jamais vu
-# par le jeu, un appui de 16 ms -- une image a 60 fps -- l'est toujours. Le
-# serveur d'origine utilisait press_and_release (quelques microsecondes) :
-# FIRE, RESCUE et NITRO n'arrivaient JAMAIS au jeu. 50 ms = trois images de marge.
+# Un appui de moins de 16 ms n'est jamais vu par le jeu (mesure) : avec le
+# press_and_release d'origine, FIRE, RESCUE et NITRO n'arrivaient pas.
 MAINTIEN = 0.05
 
 
@@ -114,12 +70,8 @@ bindings = [['UP', 'up', appui_bref],
 commandes = [b[0] for b in bindings]
 
 
-# --------------------------------------------------------------------------
-# La direction, par la manette si possible
-# --------------------------------------------------------------------------
 
 class DirectionManette:
-    """Axe analogique d'une manette Xbox 360 virtuelle."""
 
     def __init__(self):
         import vgamepad
@@ -140,12 +92,7 @@ class DirectionManette:
 
 
 class DirectionModulee:
-    """Repli sans manette : la fleche est battue en rythme.
-
-    Meme principe que modulation.py, recopie ici en une vingtaine de lignes
-    plutot qu'importe : le serveur doit pouvoir tourner seul, y compris chez
-    quelqu'un qui n'a que ce fichier.
-    """
+    """Repli sans manette : la fleche est battue en rythme."""
 
     PERIODE = 0.12
     APPUI_MINI = 0.034      # deux images a 60 fps
@@ -248,7 +195,6 @@ def main():
             if texte == 'STOPSERVEUR':
                 break
 
-            # 1. Direction analogique
             if texte.startswith('STEER:'):
                 try:
                     valeur = float(texte.split(':', 1)[1])
@@ -257,8 +203,6 @@ def main():
                         print(ROUGE + '\t' + texte + BLANC + ' (valeur illisible)')
                     continue
                 direction.regler(valeur)
-                # On n'affiche que les changements notables, sinon le mode
-                # debug deroule des centaines de lignes par seconde.
                 if debug and (dernier_steer is None
                               or abs(valeur - dernier_steer) > 0.05):
                     dernier_steer = valeur
@@ -268,7 +212,6 @@ def main():
                           + BLANC)
                 continue
 
-            # 2. Tout le reste part au clavier
             if texte in commandes:
                 if debug:
                     print(JAUNE + '\t' + texte + BLANC)
@@ -281,8 +224,6 @@ def main():
         pass
     finally:
         direction.arreter()
-        # Filet de securite : on relache tout ce qui pourrait etre reste
-        # enfonce, y compris par un client mort en plein virage.
         for touche in ('up', 'down', 'left', 'right', 'v', 'b'):
             keyboard.release(touche)
         sock.close()

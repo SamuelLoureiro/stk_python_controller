@@ -1,25 +1,10 @@
-# Ouvre le jeu a trois en deux fenetres : le serveur, puis trio.py.
+# Ouvre le serveur et trio.py dans deux fenetres. Les arguments vont a trio.py.
 #
-#   .\lancer.ps1                    pour de vrai, a trois
-#   .\lancer.ps1 --solo             tester seul, assis face a l'ecran
-#   .\lancer.ps1 --solo --fleches   idem, direction par fleches (si la manette est ignoree)
-#   .\lancer.ps1 -Muet --solo       serveur muet : rien n'est tape, on lit les commandes
+#   .\lancer.ps1 --solo             seul, face a l'ecran
+#   .\lancer.ps1                    a trois
+#   .\lancer.ps1 --solo --fleches   si le jeu ignore la manette virtuelle
 #
-# Tout ce qui n'est pas -Muet est passe tel quel a trio.py (--aveugle, --voix,
-# --arduino, --journal f.csv, --duree 180...).
-#
-# Le serveur est serveur.py : c'est lui qui comprend STEER, la direction
-# analogique, et il connait aussi tout le vocabulaire clavier. Il cree la
-# manette virtuelle : lancer SuperTuxKart APRES lui.
-#
-# Quel python : celui de l'environnement actif ($env:VIRTUAL_ENV), sinon un
-# .venv dans ce dossier, sinon le premier "python" du PATH. Il est choisi une
-# fois ici et transmis aux deux fenetres, pour qu'elles tournent avec le meme.
-#
-# Le script se relance lui-meme avec -File et -Role : construire la ligne de
-# commande enfant par concatenation de chaines deplace les guillemets. $Sources
-# est en Position 0, sinon un argument comme "--solo" serait pris pour la
-# valeur d'un autre parametre.
+# Lancer SuperTuxKart APRES : c'est le serveur qui cree la manette.
 
 param(
     [Parameter(Position = 0, ValueFromRemainingArguments = $true)] $Sources,
@@ -48,7 +33,6 @@ if (-not $Py -or -not (Test-Path $Py)) {
     exit 1
 }
 
-# --- Ce qui tourne DANS la fenetre serveur -------------------------------
 if ($Role -eq 'serveur') {
     Set-Location $TRIO
     if ($Muet) {
@@ -66,7 +50,6 @@ if ($Role -eq 'serveur') {
     return
 }
 
-# --- Ce qui tourne DANS la fenetre du jeu --------------------------------
 if ($Role -eq 'jeu') {
     Set-Location $TRIO
     $host.UI.RawUI.WindowTitle = 'TRIO'
@@ -78,12 +61,9 @@ if ($Role -eq 'jeu') {
     return
 }
 
-# --- Le lancement proprement dit -----------------------------------------
 $moi = $MyInvocation.MyCommand.Path
 
-# Start-Process recolle les arguments avec des espaces SANS les proteger : un
-# chemin "C:\Users\Jean Dupont\..." ou la liste "--solo --fleches" seraient
-# coupes en morceaux. On les entoure donc de guillemets nous-memes.
+# Start-Process ne protege pas les espaces des arguments.
 function Entre-Guillemets([string]$texte) { '"' + $texte + '"' }
 
 Write-Host ""

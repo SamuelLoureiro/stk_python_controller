@@ -1,31 +1,13 @@
 /*
- * Boitier du sourd -- TRIO (SuperTuxKart a trois : aveugle, muet, sourd)
+ * Boitier du sourd -- Arduino UNO R4 WiFi + Grove Base Shield V2.
+ * NON TESTE SUR LA CARTE (le cote PC l'est).
  *
- * Carte   : Arduino UNO R4 WiFi + Grove Base Shield V2
- * Etat    : NON TESTE SUR LA CARTE. Ecrit d'apres la documentation Seeed et le
- *           drift.ino de l'equipe (meme carte, meme bibliotheque WiFiS3). Le
- *           cote PC, lui, est teste avec TRIO/faux_arduino.py.
+ *   D2  Touch Sensor         doigt pose   -> accelerer
+ *   A0  Piezo Vibration      une tape     -> lancer l'objet
+ *   D4  Ultrasonic Ranger    pied proche  -> freiner (seuil FREIN_CM cote PC)
  *
- * Branchements (ports Grove de la Base Shield)
- *   D2  Grove Touch Sensor          doigt pose       -> accelerer (tenu)
- *   A0  Grove Piezo Vibration       une tape          -> lancer l'objet
- *   D4  Grove Ultrasonic Ranger     main/pied proche  -> freiner (optionnel)
- *
- * Ce que la carte envoie, toutes les 50 ms, en UDP vers le PC (port 6010) :
- *
- *   touche=1 dist=23 tapes=12 piezo=412
- *
- * C'est un ETAT, pas des evenements :
- *   - un paquet perdu ne bloque rien, le suivant redit tout ;
- *   - le PC tire quand le COMPTEUR tapes augmente ;
- *   - si la carte se tait (Wi-Fi coupe, reset), le PC relache tout seul au bout
- *     de 0,5 s. Plus besoin de renvoyer trois fois le relachement.
- *
- * Les SEUILS de decision sont cote PC quand c'est possible (TRIO/config_trio.py,
- * FREIN_CM) : on les regle sans reflasher. Seule la detection d'une tape reste
- * ici, parce qu'une tape dure quelques millisecondes et qu'il faut l'attraper
- * sur place. piezo= envoie le maximum lu sur la periode : c'est la valeur a
- * regarder pour regler SEUIL_PIEZO.
+ * Toutes les 50 ms, en UDP vers le PC (port 6010) : touche=1 dist=23 tapes=12 piezo=412
+ * piezo = maximum lu sur la periode, pour regler SEUIL_PIEZO.
  */
 
 #include <WiFiS3.h>
@@ -35,9 +17,7 @@
 const char* WIFI_NOM = "A_REMPLIR";          // reseau 2,4 GHz
 const char* WIFI_MDP = "A_REMPLIR";
 
-// L'IP du PC, affichee par trio.py au demarrage ("IP a saisir dans
-// l'application"). Elle change avec le reseau : partage de connexion de
-// l'iPhone -> 172.20.10.x.
+// IP du PC, affichee par trio.py (elle change avec le reseau)
 IPAddress IP_PC(192, 168, 1, 10);
 const unsigned int PORT_PC = 6010;
 // =========================================================
@@ -51,9 +31,7 @@ const int SEUIL_PIEZO = 300;                 // 0..1023 ; a regler en lisant pie
 const unsigned long REFRACTAIRE_MS = 150;    // une tape vibre plusieurs ms : un seul coup
 const unsigned long PERIODE_ENVOI_MS = 50;
 const unsigned long PERIODE_ULTRASON_MS = 100;
-// Attente maximale de l'echo. 6 ms ~ 1 m : au-dela, on considere qu'il n'y a
-// rien (dist=-1). Court expres : pendant pulseIn la carte ne lit pas le piezo,
-// et une attente de 25 ms ferait rater des tapes.
+// 6 ms ~ 1 m. Court expres : pendant pulseIn, le piezo n'est pas lu.
 const unsigned long ATTENTE_ECHO_US = 6000;
 
 WiFiUDP udp;
@@ -65,7 +43,7 @@ long distance_cm = -1;
 unsigned long dernier_envoi = 0;
 unsigned long derniere_mesure = 0;
 
-// Grove Ultrasonic Ranger : une seule broche, qui sert a emettre puis a ecouter.
+// Une seule broche : emettre, puis ecouter.
 long mesurer_distance() {
   pinMode(BROCHE_ULTRASON, OUTPUT);
   digitalWrite(BROCHE_ULTRASON, LOW);
@@ -108,8 +86,7 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   delay(1000);
 
-  if (WiFi.status() == WL_NO_SHIELD) {     // constante utilisee par drift.ino, testee sur cette carte
-    // Remede connu de l'equipe (drift.ino) : debrancher l'USB 5 s.
+  if (WiFi.status() == WL_NO_SHIELD) {
     Serial.println("Module Wi-Fi muet : debrancher l'USB 5 secondes et rebrancher.");
     while (true) {
       digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
@@ -123,9 +100,7 @@ void setup() {
 void loop() {
   unsigned long maintenant = millis();
 
-  // 1. Le piezo, lu aussi souvent que possible. On compte les FRONTS montants,
-  //    avec une periode refractaire : une seule tape fait vibrer le capteur
-  //    plusieurs millisecondes et ne doit compter qu'une fois.
+  // Fronts montants + periode refractaire : une tape vibre plusieurs ms.
   int p = analogRead(BROCHE_PIEZO);
   if (p > piezo_max) {
     piezo_max = p;
@@ -140,14 +115,11 @@ void loop() {
     piezo_haut = false;
   }
 
-  // 2. L'ultrason, dix fois par seconde seulement : chaque mesure bloque la
-  //    boucle jusqu'a ATTENTE_ECHO_US.
   if (AVEC_ULTRASON && maintenant - derniere_mesure >= PERIODE_ULTRASON_MS) {
     derniere_mesure = maintenant;
     distance_cm = mesurer_distance();
   }
 
-  // 3. L'etat complet, toutes les 50 ms.
   if (maintenant - dernier_envoi >= PERIODE_ENVOI_MS) {
     dernier_envoi = maintenant;
     if (WiFi.status() != WL_CONNECTED) {
@@ -163,8 +135,7 @@ void loop() {
     udp.endPacket();
     piezo_max = 0;
 
-    // Une ligne par seconde sur le moniteur serie (115200 bauds), pour
-    // verifier les capteurs sans le PC.
+    // Moniteur serie (115200 bauds) : une ligne par seconde
     static unsigned long derniere_trace = 0;
     if (maintenant - derniere_trace >= 1000) {
       derniere_trace = maintenant;
