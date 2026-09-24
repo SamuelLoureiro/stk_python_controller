@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Tous les reglages. Les valeurs "SUPPOSE" restent a verifier avec `python chaise.py`."""
+"""Tous les reglages. Les valeurs "SUPPOSE" restent a verifier : chaise.py, webcam.py."""
 
 import os
 
 DOSSIER_TRIO = os.path.dirname(os.path.abspath(__file__))
-MODELE_VOSK = os.path.join(DOSSIER_TRIO, 'models', 'vosk-model-small-en-us-0.15')
+MODELES = os.path.join(DOSSIER_TRIO, 'models')
+MODELE_VOSK = os.path.join(MODELES, 'vosk-model-small-en-us-0.15')
+MODELE_POSE = os.path.join(MODELES, 'pose_landmarker_lite.task')
 
 # --- Reseau -------------------------------------------------------------
 SERVEUR_STK = ('localhost', 6006)   # serveur.py
 PORT_OSC_CHAISE = 8000              # telephone (ZIG SIM ou MultiSense)
-PORT_ARDUINO = 6010                 # boitier du sourd
 
 # --- Chaise : mesure de l'angle -----------------------------------------
 # 'cap'  : orientation du telephone. Ne derive pas, mais l'acier du verin
@@ -19,7 +20,7 @@ PORT_ARDUINO = 6010                 # boitier du sourd
 # a ~1 deg pres sur +-66 deg. A reconfirmer telephone fixe dessous.
 METHODE_CHAISE = 'cap'
 
-# Ramene chaque mesure a la convention : angle > 0 = l'aveugle tourne a SA droite.
+# Ramene chaque mesure a la convention : angle > 0 = le joueur tourne a droite.
 # ZIG SIM : -1 mesure le 2026-09-24. MultiSense : SUPPOSE (le gyro change de
 # signe si le telephone est retourne).
 SIGNE_CAP = {'zigsim': -1, 'multisense': +1}
@@ -36,11 +37,6 @@ AGITATION_MAX = 3.0                 # deg/s au-dela desquels la calibration est 
 SILENCE_MAX = 0.5                   # s sans message du telephone -> direction au centre
 
 # --- Chaise : effet sur le kart -----------------------------------------
-# 'miroir'       : l'aveugle tourne a sa gauche -> kart a droite. Pour un
-#                  aveugle qui fait face au repere tenu par le muet.
-# 'egocentrique' : l'aveugle tourne a sa droite -> kart a droite.
-CORRESPONDANCE = 'miroir'
-
 # 'analogique' : manette virtuelle (serveur.py). 'fleches' : fleche battue en
 # rythme, avec n'importe quel serveur.
 DIRECTION = 'analogique'
@@ -49,29 +45,32 @@ ANGLE_MINI = 5.0                    # deg, zone morte
 ANGLE_MAXI = 35.0                   # deg, braquage complet (~80 % de l'angle confortable)
 COURBE = 1.5                        # > 1 : plus doux pres du neutre
 
-ANGLE_DEMI_TOUR = 100.0             # deg : l'aveugle se retourne, gaz coupes. None = off
-HYSTERESIS_DEMI_TOUR = 20.0         # deg
+# --- Webcam : la personne debout ----------------------------------------
+# Deux mains levees = accelerer, une seule = freiner, aucune = rien.
+ACCELERATION = 'webcam'             # ou 'automatique' (--solo, --auto)
+CAMERA_INDEX = 0
+CAMERA_LARGEUR = 640
+CAMERA_HAUTEUR = 480
+MIROIR = True                       # affichage seulement
+FENETRE_WEBCAM = True
 
-# --- Sourd ----------------------------------------------------------------
-ACCELERATION = 'sourd'              # ou 'automatique'
+# SUPPOSE, a regler avec webcam.py. Coordonnees d'image : 0 en haut, 1 en bas.
+LIGNE_DEBOUT = 0.45                 # le nez de la personne debout doit etre au-dessus
+MARGE_MAIN = 0.2                    # poignet au-dessus de l'epaule, en largeurs d'epaules
+VISIBILITE_MIN = 0.5
+ATTENTE_GESTE = 0.2                 # s : lever les deux mains passe par "une main"
+ABSENCE_MAX = 0.5                   # s sans personne debout -> tout relache
 
-# Modele anglais : mots anglais.
+# --- Voix -----------------------------------------------------------------
+# Modele anglais : mots anglais. Une expression de plusieurs mots est
+# reconnue comme un tout.
 MOTS_VOIX = {
     'fire': 'fire',
+    'help me': 'rescue',
     'turbo': 'turbo',
-    'help': 'rescue',
-    'center': 'recentrer',          # recentre la chaise
 }
-DELAI_VOIX = 0.5                    # s avant qu'un meme mot puisse redeclencher
-
-# Mots a dire deux fois dans le delai (s). Vosk, limite a quatre mots, prend
-# parfois la musique du jeu pour "help" : sauvetages parasites le 2026-09-24.
-MOTS_A_REPETER = {'help': 1.5}
-
+DELAI_VOIX = 0.5                    # s avant qu'une meme expression puisse redeclencher
 MICRO = None                        # numero du micro, None = celui de Windows
-
-WATCHDOG_ARDUINO = 0.5              # s sans paquet du boitier -> tout relache
-FREIN_CM = None                     # pedale a ultrason : frein sous cette distance
 
 # --- Affichage ----------------------------------------------------------
 PERIODE_BOUCLE = 1 / 60

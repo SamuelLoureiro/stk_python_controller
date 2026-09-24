@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Seul point de sortie vers le serveur : fusionne les demandes des sources
-(chaise, boitier, voix), annule les opposees, et n'envoie que les changements."""
+(chaise, webcam, voix), annule les opposees, et n'envoie que les changements."""
 
 import contextlib
 import socket

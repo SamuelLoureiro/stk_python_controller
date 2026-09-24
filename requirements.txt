@@ -1,14 +1,16 @@
-# TRIO - SuperTuxKart a trois (aveugle / muet / sourd)
-# Teste avec Python 3.11 sous Windows.
-#
+# TRIO - Python 3.11, Windows
 #   pip install -r requirements.txt
-#   python installer.py            (modele de voix + verifications)
+#   python installer.py            (modeles + verifications)
 
-oscpy==0.6.0          # reception OSC du telephone (ZIG SIM ou MultiSense)
-keyboard==0.13.5      # le serveur tape les touches du jeu
-vosk==0.3.45          # reconnaissance vocale hors ligne (le modele : installer.py)
-sounddevice==0.5.6    # le micro
+oscpy==0.6.0          # telephone (ZIG SIM ou MultiSense)
+keyboard==0.13.5      # le serveur tape les touches
+vosk==0.3.45          # voix hors ligne
+sounddevice==0.5.6    # micro
+mediapipe==0.10.21    # pose de la personne debout (1.0.x a change d'API)
+# cv2 : opencv-contrib-python, deja tire par mediapipe. Ne PAS ajouter
+# opencv-python : les deux installent le meme module et s'ecrasent.
+opencv-contrib-python==4.11.0.86
 
-# Manette Xbox virtuelle : la direction analogique. Windows seulement ; demande
-# le pilote ViGEmBus, que son installation propose. Sans elle : trio.py --fleches.
+# Manette Xbox virtuelle (direction analogique), Windows seulement ; demande le
+# pilote ViGEmBus, que son installation propose. Sans elle : trio.py --fleches.
 vgamepad==0.1.0; sys_platform == "win32"

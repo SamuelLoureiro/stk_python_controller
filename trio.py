@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Le jeu a trois : l'aveugle braque avec sa chaise, le muet le guide par gestes,
-le sourd tient la vitesse et les objets.
+"""Le jeu a trois : le joueur assis braque avec la chaise, la personne debout
+derriere lui regle la vitesse avec ses mains (webcam), et la voix lance les objets.
 
-    python trio.py                  tout ce qui peut demarrer
-    python trio.py --solo           seul, face a l'ecran, acceleration automatique
-    python trio.py --aveugle        la chaise seule (--voix, --arduino : idem)
+    python trio.py                  chaise + webcam + voix
+    python trio.py --solo           sans personne debout : le kart accelere tout seul
+    python trio.py --chaise         la chaise seule (--webcam, --voix : idem)
     python trio.py --fleches        si le jeu ignore la manette virtuelle
     python trio.py --simulation     affiche les commandes sans les envoyer
     python trio.py --journal partie.csv --duree 180
 
 Le serveur (serveur.py) doit tourner : .\\lancer.ps1 ouvre les deux fenetres.
-Pendant la partie : C recentre la chaise (ou dire "center"), Q quitte.
+Pendant la partie : C recentre la chaise, Q quitte (terminal ou fenetre webcam).
 """
 
 import argparse
@@ -23,10 +23,7 @@ import config_trio as cfg
 from sortie_stk import SortieSTK
 
 
-# -------------------------------------------------------------------- outils
-
 def bip(frequence=880, duree_ms=120):
-    """Signal sonore : l'aveugle ne voit pas l'ecran, il doit entendre ou on en est."""
     try:
         import winsound
         winsound.Beep(frequence, duree_ms)
@@ -51,7 +48,7 @@ class Journal:
     def __init__(self, chemin):
         dossier = os.path.dirname(chemin)
         if dossier:
-            os.makedirs(dossier, exist_ok=True)     # --journal journaux\partie1.csv
+            os.makedirs(dossier, exist_ok=True)
         self._fichier = open(chemin, 'w', newline='', encoding='utf8')
         self._csv = csv.writer(self._fichier)
         self._csv.writerow(['t', 'type', 'angle_chaise', 'steer', 'touches', 'detail'])
@@ -73,8 +70,6 @@ class Journal:
 
 
 class SortieJournalisee(SortieSTK):
-    """SortieSTK qui recopie chaque commande envoyee dans le journal."""
-
     def __init__(self, *args, journal=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.journal = journal
@@ -85,12 +80,10 @@ class SortieJournalisee(SortieSTK):
             self.journal.commande(commande)
 
 
-# --------------------------------------------------------------- demarrages
-
-def demarrer_chaise(sortie, port, position='L AVEUGLE FACE AU MUET'):
-    """Ouvre le port, attend le telephone, calibre. Renvoie (capteur, aveugle) ou (None, None)."""
-    from aveugle import Aveugle
+def demarrer_chaise(sortie, port):
+    """Ouvre le port, attend le telephone, calibre. Renvoie (capteur, direction) ou (None, None)."""
     from chaise import CapteurChaise
+    from direction import Direction
     from reseau import bandeau_reseau, ips_locales
 
     capteur = CapteurChaise(port=port)
@@ -109,13 +102,13 @@ def demarrer_chaise(sortie, port, position='L AVEUGLE FACE AU MUET'):
         print('[chaise] aucune donnee en 30 s : la chaise ne pilotera pas.')
         capteur.arreter()
         return None, None
-    time.sleep(1.0)     # une fenetre pleine pour la frequence, et les deux flux arrives
+    time.sleep(1.0)     # une fenetre pleine pour la frequence
     e = capteur.etat()
     print('[chaise] %s detecte (%s), orientation %d Hz, gyro %d Hz.'
           % (e.profil, e.appareil or 'appareil inconnu', e.hz_orientation, e.hz_gyro))
 
     for essai in range(3):
-        print('[chaise] %s, IMMOBILE. Calibration dans :' % position)
+        print('[chaise] ASSIS FACE A L ECRAN, IMMOBILE. Calibration dans :')
         for n in (3, 2, 1):
             print('[chaise]   %d' % n, flush=True)
             bip(660, 120)
@@ -129,112 +122,91 @@ def demarrer_chaise(sortie, port, position='L AVEUGLE FACE AU MUET'):
         bip(330, 200)
         print('[chaise] REFUSE : %s. On recommence.' % explication)
     else:
-        print('[chaise] calibration impossible : la chaise ne pilotera pas tant')
-        print('[chaise] qu on n a pas recentre (touche C, ou dire "center").')
+        print('[chaise] calibration impossible : touche C pour recentrer.')
 
-    return capteur, Aveugle(sortie, capteur)
+    return capteur, Direction(sortie, capteur)
 
-
-# ---------------------------------------------------------------------- main
 
 def lire_arguments():
-    p = argparse.ArgumentParser(description='SuperTuxKart a trois : aveugle, muet, sourd.')
-    p.add_argument('--aveugle', action='store_true', help='la chaise (telephone dessous)')
-    p.add_argument('--voix', action='store_true', help='les mots-cles du sourd')
-    p.add_argument('--arduino', action='store_true', help='le boitier du sourd')
-    p.add_argument('--solo', action='store_true',
-                   help='un seul joueur, face a l ecran : correspondance egocentrique, '
-                        'acceleration automatique, pas de detection de demi-tour')
+    p = argparse.ArgumentParser(description='SuperTuxKart a trois : chaise, webcam, voix.')
+    p.add_argument('--chaise', action='store_true', help='la chaise (telephone dessous)')
+    p.add_argument('--webcam', action='store_true', help='la personne debout (vitesse)')
+    p.add_argument('--voix', action='store_true', help='fire, help me, turbo')
+    p.add_argument('--solo', '--auto', dest='auto', action='store_true',
+                   help='le kart accelere tout seul, sans personne debout')
     p.add_argument('--fleches', action='store_true',
-                   help='direction par fleches battues en rythme au lieu de la manette '
-                        'virtuelle (repli si le jeu ignore la manette)')
+                   help='fleches battues en rythme au lieu de la manette virtuelle')
     p.add_argument('--simulation', action='store_true', help='n envoie rien au serveur')
     p.add_argument('--silencieux', action='store_true', help='n affiche plus chaque commande')
     p.add_argument('--journal', metavar='FICHIER.csv', help='enregistre la partie')
     p.add_argument('--duree', type=float, default=None, metavar='S',
-                   help='s arrete tout seul au bout de S secondes (sessions chronometrees)')
+                   help='s arrete tout seul au bout de S secondes')
     p.add_argument('--port', type=int, default=cfg.PORT_OSC_CHAISE, help='port OSC du telephone')
-    p.add_argument('--port-arduino', type=int, default=cfg.PORT_ARDUINO,
-                   help='port UDP du boitier (defaut %d)' % cfg.PORT_ARDUINO)
+    p.add_argument('--camera', type=int, default=None, help='numero de la webcam')
     p.add_argument('--micro', type=int, default=None, help='numero du micro')
-    p.add_argument('--auto', action='store_true', help='le kart accelere tout seul')
-    p.add_argument('--correspondance', choices=['miroir', 'egocentrique'], default=None)
     p.add_argument('--methode', choices=['cap', 'gyro'], default=None)
     args = p.parse_args()
-    if not (args.aveugle or args.voix or args.arduino):
-        args.aveugle = args.voix = args.arduino = True
+    if not (args.chaise or args.webcam or args.voix):
+        args.chaise = args.voix = True
+        args.webcam = not args.auto
     return args
 
 
 def main():
     args = lire_arguments()
-
     if args.micro is not None:
         cfg.MICRO = args.micro
     if args.auto:
         cfg.ACCELERATION = 'automatique'
-    if args.correspondance:
-        cfg.CORRESPONDANCE = args.correspondance
     if args.methode:
         cfg.METHODE_CHAISE = args.methode
     if args.fleches:
         cfg.DIRECTION = 'fleches'
-    if args.solo:
-        cfg.CORRESPONDANCE = args.correspondance or 'egocentrique'
-        cfg.ACCELERATION = 'automatique'
-        cfg.ANGLE_DEMI_TOUR = None
 
     journal = Journal(args.journal) if args.journal else None
     sortie = SortieJournalisee(serveur=cfg.SERVEUR_STK, envoi_reel=not args.simulation,
                                trace=not args.silencieux, journal=journal)
 
     print()
-    print('=== TRIO : aveugle / muet / sourd ===')
-    if args.solo:
-        print('MODE SOLO : assis face a l ecran, le kart accelere tout seul,')
-        print('tourner la chaise a droite fait tourner le kart a droite.')
+    print('=== TRIO : chaise / webcam / voix ===')
     if args.simulation:
         print('MODE SIMULATION : rien n est envoye au serveur.')
     else:
         print('Commandes vers %s:%d.' % cfg.SERVEUR_STK)
         if cfg.DIRECTION == 'analogique':
-            print('Direction ANALOGIQUE : le serveur doit etre serveur.py (il comprend STEER).')
-            print('Si le kart avance sans tourner : --fleches.')
+            print('Direction ANALOGIQUE (serveur.py). Si le kart avance sans tourner : --fleches.')
         else:
-            print('Direction par FLECHES modulees : n importe quel serveur convient.')
-    print('Correspondance chaise -> kart : %s.   Acceleration : %s.'
-          % (cfg.CORRESPONDANCE, cfg.ACCELERATION))
+            print('Direction par FLECHES modulees.')
+    print('Acceleration : %s.' % cfg.ACCELERATION)
     print()
 
-    roles = []          # (nom, objet) : objets avec mettre_a_jour / etat_texte / arreter
-    capteur = None
+    roles = []          # (nom, objet) : mettre_a_jour / etat_texte / arreter
+    capteur = direction = webcam = None
 
-    if args.aveugle:
-        capteur, aveugle = demarrer_chaise(
-            sortie, args.port,
-            'ASSIS FACE A L ECRAN' if args.solo else 'L AVEUGLE FACE AU MUET')
-        if aveugle:
-            roles.append(('aveugle', aveugle))
+    if args.chaise:
+        capteur, direction = demarrer_chaise(sortie, args.port)
+        if direction:
+            roles.append(('chaise', direction))
 
-    if args.arduino:
-        from sourd import ArduinoSourd
-        boitier = ArduinoSourd(sortie, port=args.port_arduino)
+    if args.webcam:
+        from webcam import Webcam
+        webcam = Webcam(sortie, camera=args.camera)
         try:
-            boitier.demarrer()
-            roles.append(('arduino', boitier))
-        except RuntimeError as erreur:
-            print('[arduino] non demarre : %s' % erreur)
+            webcam.demarrer()
+            roles.append(('webcam', webcam))
+        except Exception as erreur:
+            print('[webcam] non demarree : %s' % erreur)
+            webcam = None
 
-    voix = None
     if args.voix:
-        from sourd import VoixSourd
-        voix = VoixSourd(sortie, recentrer=capteur.recentrer if capteur else None)
+        from voix import Voix
+        voix = Voix(sortie)
         try:
             voix.verifier()
             voix.start()
             roles.append(('voix', voix))
-            print('[voix] mots reconnus : %s.' % ', '.join(
-                '%s (%s)' % kv for kv in cfg.MOTS_VOIX.items()))
+            print('[voix] expressions reconnues : %s.' % ', '.join(
+                '"%s" (%s)' % kv for kv in cfg.MOTS_VOIX.items()))
         except RuntimeError as erreur:
             print('[voix] non demarree : %s' % erreur)
 
@@ -265,24 +237,24 @@ def main():
                 break
 
             k = touche()
+            if webcam and cfg.FENETRE_WEBCAM:
+                k = webcam.afficher() or k
             if k == 'q':
                 break
-            if k == 'c' and capteur:
-                if capteur.recentrer():
-                    bip(1320, 150)
-                    print('        -- chaise recentree --')
+            if k == 'c' and capteur and capteur.recentrer():
+                bip(1320, 150)
+                print('        -- chaise recentree --')
 
             with sortie.groupe():
                 for nom, role in roles:
                     if hasattr(role, 'mettre_a_jour'):
                         role.mettre_a_jour()
 
-            aveugle = dict(roles).get('aveugle')
             if journal:
-                journal.etat(aveugle.angle if aveugle else None,
-                             aveugle.consigne if aveugle else 0.0,
+                journal.etat(direction.angle if direction else None,
+                             direction.consigne if direction else 0.0,
                              sortie.etat_texte(),
-                             'demi-tour' if aveugle and aveugle.demi_tour else '')
+                             webcam.geste() if webcam else '')
 
             if maintenant >= prochaine_ligne:
                 prochaine_ligne = maintenant + cfg.PERIODE_ETAT

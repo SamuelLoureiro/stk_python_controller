@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Le telephone sous la chaise : de combien l'aveugle a-t-il pivote ?
+"""Le telephone sous la chaise : de combien le joueur assis a-t-il pivote ?
 
 'cap'  : ZIG SIM, rotation relative r = q * conj(q0) autour de la verticale,
          2 * atan2(r.z, r.w) : juste quel que soit le montage (le quaternion
@@ -76,7 +76,7 @@ def _agitation(vitesses):
 
 @dataclass
 class EtatChaise:
-    """Instantane de la chaise. Angles en degres, > 0 = l'aveugle tourne a SA droite."""
+    """Instantane de la chaise. Angles en degres, > 0 = le joueur tourne a droite."""
     profil: str = 'auto'
     appareil: str = None
     recu: bool = False          # au moins un message utile depuis le demarrage
