@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Seul point de sortie vers le serveur : fusionne les demandes des sources
-(chaise, webcam, voix), annule les opposees, et n'envoie que les changements."""
+"""Module d'envoi UDP vers le serveur de jeu, avec fusion des entrees multi-sources."""
 
 import contextlib
 import socket
 import threading
 import time
 
-# Maintenues : P_<NOM> / R_<NOM>, enfoncees tant qu'une source les demande.
+# Actions continues (maintenues tant qu'une source est active)
 CONTINUES = {
     'accelerate': 'ACCELERATE',
     'brake':      'BRAKE',
@@ -17,7 +16,7 @@ CONTINUES = {
     'drift':      'SKIDDING',
 }
 
-# Ponctuelles : le serveur tient la touche 50 ms lui-meme.
+# Actions ponctuelles traitees en impulsion
 IMPULSIONS = {
     'fire':   'FIRE',
     'turbo':  'NITRO',
@@ -26,12 +25,12 @@ IMPULSIONS = {
 
 SEUIL_STEER = 0.01
 
-# Demandees ensemble, elles s'annulent.
+# Actions antagonistes qui se neutralisent mutuellement
 OPPOSEES = [('left', 'right'), ('accelerate', 'brake')]
 
 
 class SortieSTK:
-    """Thread-safe : la voix tourne dans son propre thread."""
+    """Gestionnaire thread-safe pour envoyer les commandes UDP au serveur."""
 
     def __init__(self, serveur=('localhost', 6006), envoi_reel=True, trace=True):
         self.serveur = serveur
@@ -41,17 +40,15 @@ class SortieSTK:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._verrou = threading.RLock()
 
-        self._differe = 0            # > 0 : on accumule sans encore envoyer
-        self._demandes = {}          # action -> set(noms de sources)
-        self._enfoncees = set()      # actions dont la touche est reellement enfoncee
-        self._dernier_pulse = {}     # action -> instant du dernier envoi
+        self._differe = 0            # compteur pour le groupement de commandes
+        self._demandes = {}          # action -> set(sources)
+        self._enfoncees = set()      # actions actuellement envoyees comme enfoncees
+        self._dernier_pulse = {}     # horodatage du dernier pulse par action
 
-        self._dernier_steer = None   # derniere consigne analogique envoyee
+        self._dernier_steer = None   # memoire de la derniere valeur analogique
 
-        self.derniere_commande = ''  # pour la ligne d'etat
+        self.derniere_commande = ''
         self.n_envois = 0
-
-    # ------------------------------------------------------------------ envoi
 
     def _envoyer(self, commande):
         self.derniere_commande = commande
@@ -61,10 +58,8 @@ class SortieSTK:
         if self.envoi_reel:
             self._sock.sendto(commande.encode(), self.serveur)
 
-    # -------------------------------------------------- actions maintenues
-
     def set_continuous(self, action, source, active):
-        """<source> veut (ou ne veut plus) <action>."""
+        """Enregistre la demande d'une source pour une action continue."""
         if action not in CONTINUES:
             return
         with self._verrou:
@@ -78,8 +73,7 @@ class SortieSTK:
 
     @contextlib.contextmanager
     def groupe(self):
-        """Applique d'un coup les demandes du bloc : une par une, la sortie
-        passerait par des etats intermediaires (appuis fantomes)."""
+        """Contexte pour grouper les changements et eviter les etats transitoires."""
         with self._verrou:
             self._differe += 1
         try:
@@ -98,7 +92,7 @@ class SortieSTK:
                 voulues.discard(gauche)
                 voulues.discard(droite)
 
-        # relacher avant d'enfoncer : jamais deux fleches a la fois
+        # Relacher avant d'enfoncer pour eviter les conflits de touches
         for action in sorted(self._enfoncees - voulues):
             self._envoyer('R_' + CONTINUES[action])
             self._enfoncees.discard(action)
@@ -107,10 +101,8 @@ class SortieSTK:
             self._envoyer('P_' + CONTINUES[action])
             self._enfoncees.add(action)
 
-    # ------------------------------------------------ direction analogique
-
     def steer(self, valeur):
-        """Direction continue, -1 (gauche) a +1 (droite) : manette virtuelle."""
+        """Transmet la consigne analogique normalisee (-1 a +1)."""
         valeur = max(-1.0, min(1.0, float(valeur)))
         with self._verrou:
             if (self._dernier_steer is not None
@@ -119,10 +111,8 @@ class SortieSTK:
             self._dernier_steer = valeur
             self._envoyer('STEER:%+.3f' % valeur)
 
-    # ------------------------------------------------- actions ponctuelles
-
     def pulse(self, action, cooldown_s=0.0):
-        """Action ponctuelle, avec un temps mort anti-rafale."""
+        """Envoie une commande ponctuelle avec delai anti-rebond."""
         if action not in IMPULSIONS:
             return
         maintenant = time.monotonic()
@@ -132,11 +122,8 @@ class SortieSTK:
             self._dernier_pulse[action] = maintenant
             self._envoyer(IMPULSIONS[action])
 
-    # ------------------------------------------------------------ securite
-
     def release_all(self):
-        """Relache TOUTES les actions, meme celles qu'on croit libres : un client
-        mort en plein virage a pu laisser une fleche enfoncee."""
+        """Reinitialise et relache toutes les commandes vers le jeu."""
         with self._verrou:
             self._demandes.clear()
             self._enfoncees.clear()
@@ -146,6 +133,7 @@ class SortieSTK:
             self._envoyer('STEER:+0.000')
 
     def etat_texte(self):
+        """Resume textuel des actions actuellement maintenues."""
         with self._verrou:
             if not self._enfoncees:
                 return '-'

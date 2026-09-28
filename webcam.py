@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""La personne debout, face a la webcam, derriere le joueur assis.
-
-    mains sur la tete (panique)          -> freiner
-    geste 6-7 (mains en alternance)      -> accelerer
-    deux mains levees = accelerer, une seule = freiner, aucune = rien.
-    high five entre la personne debout et le joueur assis -> fire
-
-Le high five : une main levee du joueur assis (au-dessus de son epaule) et
-une main de la personne debout se rejoignent a l'image. La webcam ne voit pas
-la profondeur : des mains l'une devant l'autre comptent aussi.
-
-Le 6-7 : les deux mains devant soi, sous les epaules, qui montent et
-descendent en alternance. d = (hauteur main G - hauteur main D) / largeur
-d'epaules oscille autour de zero ; on compte les bascules de +SEUIL a -SEUIL.
-Lever ou baisser les deux mains ensemble ne change pas d.
-
-    python webcam.py              outil de mesure : fenetre + valeurs, Q pour quitter
-    python webcam.py --camera 1
-"""
+"""Module de vision par ordinateur pour detecter les gestes d'acceleration, freinage et high-five."""
 
 import argparse
 import collections
@@ -37,14 +19,13 @@ GESTES = {0: 'rien', 1: 'freiner', 2: 'accelerer'}
 
 
 def personne_debout(poses):
-    """La pose dont le nez est le plus haut, s'il est au-dessus de LIGNE_DEBOUT."""
+    """Trouve la personne debout en cherchant le visage situe le plus haut."""
     candidates = [p for p in poses if p[NEZ][1] < cfg.LIGNE_DEBOUT]
     return min(candidates, key=lambda p: p[NEZ][1]) if candidates else None
 
 
 def hauteurs_mains(pose, largeur, hauteur):
-    """Hauteur de chaque poignet au-dessus de son epaule, en largeurs d'epaules.
-    None si le poignet n'est pas assez visible."""
+    """Evalue la hauteur relative de chaque poignet par rapport aux epaules."""
     epaules = abs(pose[EPAULE_G][0] - pose[EPAULE_D][0]) * largeur or 1.0
     resultat = []
     for poignet, epaule in ((POIGNET_G, EPAULE_G), (POIGNET_D, EPAULE_D)):
@@ -56,15 +37,13 @@ def hauteurs_mains(pose, largeur, hauteur):
 
 
 def personne_assise(poses, debout):
-    """Le joueur sur la chaise : l'autre pose, celle dont le nez est le plus bas."""
+    """Identifie la pose du joueur assis sur la chaise."""
     autres = [p for p in poses if p is not debout]
     return max(autres, key=lambda p: p[NEZ][1]) if autres else None
 
 
 def distance_high_five(debout, assise, largeur, hauteur):
-    """Plus petite distance entre une main levee du joueur assis et une main de
-    la personne debout, en largeurs d'epaules de la personne debout. None si le
-    joueur assis n'a pas de main levee."""
+    """Calcule la distance entre la main levee du joueur assis et la main du joueur debout."""
     epaules = abs(debout[EPAULE_G][0] - debout[EPAULE_D][0]) * largeur or 1.0
     levees = [assise[p] for p, h in zip((POIGNET_G, POIGNET_D),
                                         hauteurs_mains(assise, largeur, hauteur))
@@ -77,8 +56,7 @@ def distance_high_five(debout, assise, largeur, hauteur):
 
 
 def distance_tete(pose, poignet, largeur, hauteur):
-    """Poignet -> centre de la tete, en largeurs d'epaules. Le centre est le
-    milieu des oreilles, ou le nez si les mains les cachent."""
+    """Calcule la distance d'un poignet au centre de la tete normalisee."""
     epaules = abs(pose[EPAULE_G][0] - pose[EPAULE_D][0]) * largeur or 1.0
     og, od = pose[OREILLE_G], pose[OREILLE_D]
     if min(og[2], od[2]) >= cfg.VISIBILITE_TETE:
@@ -90,21 +68,18 @@ def distance_tete(pose, poignet, largeur, hauteur):
 
 
 def mains_sur_tete(pose, largeur, hauteur):
-    """Distance a la tete de la main la plus eloignee, ou None si une main est
-    cachee ou sous les epaules. Sous FREIN_DISTANCE_TETE : on freine."""
+    """Verifie si les deux mains sont posees sur la tete (geste frein)."""
     if min(pose[EPAULE_G][2], pose[EPAULE_D][2]) < cfg.VISIBILITE_MIN:
         return None
     epaules_y = (pose[EPAULE_G][1] + pose[EPAULE_D][1]) / 2
     for poignet in (POIGNET_G, POIGNET_D):
-        # Seuil plus bas : une main sur la tete est souvent a moitie cachee.
         if pose[poignet][2] < cfg.VISIBILITE_TETE or pose[poignet][1] >= epaules_y:
             return None
     return max(distance_tete(pose, p, largeur, hauteur) for p in (POIGNET_G, POIGNET_D))
 
 
 def ecart_mains(pose, largeur, hauteur):
-    """d du 6-7, ou None si une main est cachee ou levee (au-dessus de l'epaule,
-    c'est un autre geste)."""
+    """Difference de hauteur entre les mains pour le geste 6-7."""
     hauteurs = hauteurs_mains(pose, largeur, hauteur)
     if None in hauteurs or max(hauteurs) > cfg.MARGE_MAIN:
         return None
@@ -112,9 +87,7 @@ def ecart_mains(pose, largeur, hauteur):
 
 
 class SixSept:
-    """Le 6-7 est actif s'il y a eu SIXSEPT_BASCULES bascules dans les
-    SIXSEPT_FENETRE dernieres secondes, la derniere il y a moins de
-    SIXSEPT_MAINTIEN : le kart lache des que le geste s'arrete."""
+    """Detecteur du mouvement alternatif rapide des mains pour l'acceleration."""
 
     def __init__(self):
         self.signe = 0
@@ -125,7 +98,7 @@ class SixSept:
         self.d = d
         if d is not None:
             cote = 1 if d > cfg.SIXSEPT_SEUIL else -1 if d < -cfg.SIXSEPT_SEUIL else 0
-            # Hysteresis : rester entre -SEUIL et +SEUIL ne change rien.
+            # Seuil d'hysteresis pour eviter les faux positifs au neutre
             if cote and cote != self.signe:
                 if self.signe:
                     self.bascules.append(t)
@@ -137,8 +110,7 @@ class SixSept:
 
 
 def analyser(poses, largeur, hauteur, sixsept, t):
-    """(geste, pose retenue). geste : 'accelerer', 'freiner', 'rien' ou 'absent'.
-    Priorite : mains sur la tete, puis 6-7, puis mains levees."""
+    """Identifie le geste effectif selon l'ordre de priorite (frein, 6-7, mains levees)."""
     debout = personne_debout(poses)
     if debout is None:
         sixsept.observer(None, t)
@@ -149,7 +121,7 @@ def analyser(poses, largeur, hauteur, sixsept, t):
         return 'freiner', debout
     if fait_67:
         return 'accelerer', debout
-    # Une main posee sur la tete n'est pas une main levee.
+    # Les mains sur la tete sont exclues des mains levees simples
     levees = sum(1 for h, p in zip(hauteurs_mains(debout, largeur, hauteur),
                                    (POIGNET_G, POIGNET_D))
                  if h is not None and h > cfg.MARGE_MAIN
@@ -158,7 +130,7 @@ def analyser(poses, largeur, hauteur, sixsept, t):
 
 
 class Filtre:
-    """Un geste ne compte qu'apres avoir tenu ATTENTE_GESTE (ABSENCE_MAX pour 'absent')."""
+    """Filtre temporel pour stabiliser la detection des gestes."""
 
     def __init__(self):
         self.stable = 'absent'
@@ -178,6 +150,8 @@ class Filtre:
 
 
 class Webcam:
+    """Capture video et pipeline MediaPipe pour le pilotage par gestes."""
+
     def __init__(self, sortie=None, camera=None):
         self.sortie = sortie
         self.camera = cfg.CAMERA_INDEX if camera is None else camera
@@ -187,10 +161,10 @@ class Webcam:
         self._arret = threading.Event()
         self._filtre = Filtre()
         self._sixsept = SixSept()
-        self._tape = None           # distance du high five, pour le reglage
+        self._tape = None           # distance de contact pour le high-five
         self._en_tape = False
-        self._tapes = 0             # high fives vus par le fil camera
-        self._tapes_envoyes = 0     # ... et deja transformes en fire
+        self._tapes = 0             # compteur de high-fives detectes
+        self._tapes_envoyes = 0     # impulsions fire transmises
         self._image = None
         self._poses = []
         self._debout = None
@@ -203,6 +177,7 @@ class Webcam:
         self._fil = None
 
     def demarrer(self):
+        """Charge le modele MediaPipe et demarre le flux video."""
         import os
         import cv2
         from mediapipe.tasks import python as mp_python
@@ -226,6 +201,7 @@ class Webcam:
         print('[webcam] camera %d ouverte.' % self.camera)
 
     def _boucle(self):
+        """Thread de traitement video continu."""
         import cv2
         import mediapipe as mp
         horodatage = 0
@@ -236,7 +212,7 @@ class Webcam:
                 if not ok:
                     time.sleep(0.01)
                     continue
-                # Mediapipe exige des horodatages strictement croissants.
+                # MediaPipe exige des horodatages strictement croissants
                 horodatage = max(horodatage + 1, int(time.monotonic() * 1000))
                 rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 resultat = self._detecteur.detect_for_video(
@@ -256,7 +232,7 @@ class Webcam:
                     if en_tape and not self._en_tape:
                         self._tapes += 1
                     self._en_tape = en_tape
-                    # Le bras tendu pour taper ne doit pas freiner (une main levee).
+                    # Le bras tendu pour le high five ne doit pas freiner par erreur
                     self._filtre.mettre(self._filtre.stable if en_tape else geste, t)
                     self._derniere = t
                     self._numero += 1
@@ -267,12 +243,14 @@ class Webcam:
             print('        [webcam] ARRETEE : %s' % erreur)
 
     def geste(self):
+        """Renvoie le geste stable actuellement filtre."""
         with self._verrou:
             if time.time() - self._derniere > cfg.ABSENCE_MAX:
                 return 'absent'
             return self._filtre.stable
 
     def mettre_a_jour(self):
+        """Transmet les commandes d'acceleration, freinage et high-five a SortieSTK."""
         if self.sortie is None:
             return
         g = self.geste()
@@ -286,8 +264,7 @@ class Webcam:
             self.sortie.set_continuous('brake', NOM, g == 'freiner')
 
     def mesures(self):
-        """Pour le reglage : nez de la personne retenue, hauteur de chaque main,
-        d du 6-7 et distance des mains a la tete."""
+        """Renvoie les valeurs brutes de position des mains pour le debug."""
         with self._verrou:
             if self._image is None or self._debout is None:
                 return None
@@ -296,6 +273,7 @@ class Webcam:
                     self._sixsept.d, mains_sur_tete(self._debout, largeur, hauteur))
 
     def detail_gestes(self):
+        """Formate les metriques en chaine pour l'overlay video."""
         m = self.mesures()
         if m is None:
             return '6-7 -  tete -  tape -'
@@ -307,7 +285,7 @@ class Webcam:
                                               '-' if tape is None else '%.2f' % tape)
 
     def afficher(self):
-        """Rafraichit la fenetre (fil principal). Renvoie la touche pressee, ou None."""
+        """Affiche la fenetre OpenCV avec le squelette et les indicateurs."""
         import cv2
         with self._verrou:
             nouvelle = self._image is not None and self._numero != self._affichee
@@ -342,11 +320,13 @@ class Webcam:
         return chr(touche).lower() if touche != 255 else None
 
     def etat_texte(self):
+        """Statut condense pour la console."""
         if self.erreur:
             return 'ARRETEE'
         return '%s (%.0f im/s)' % (self.geste(), self.ips)
 
     def arreter(self):
+        """Libere la camera et ferme les fenetres OpenCV."""
         import cv2
         self._arret.set()
         if self._fil:
@@ -363,6 +343,7 @@ class Webcam:
 
 
 def main():
+    """Utilitaire de calibration visuelle pour la camera."""
     p = argparse.ArgumentParser(description='Reglage de la webcam : la personne debout.')
     p.add_argument('--camera', type=int, default=None)
     p.add_argument('--duree', type=float, default=None, metavar='S')

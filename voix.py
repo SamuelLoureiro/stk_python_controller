@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""La voix (Vosk, hors ligne) : "fire", "help me", "turbo"."""
+"""Reconnaissance vocale hors-ligne (Vosk) pour declencher les objets et aides."""
 
 import collections
 import json
@@ -12,7 +12,7 @@ import config_trio as cfg
 
 
 def reperer(texte):
-    """Les expressions de MOTS_VOIX presentes dans le texte, dans l'ordre dit."""
+    """Extrait les mots-cles definis dans le texte transcrit."""
     mots = texte.lower().split()
     trouvees = []
     for expression in cfg.MOTS_VOIX:
@@ -23,10 +23,13 @@ def reperer(texte):
 
 
 def compter(texte):
+    """Compte les occurrences de chaque mot-cle."""
     return collections.Counter(reperer(texte))
 
 
 class Voix(threading.Thread):
+    """Thread de capture micro et reconnaissance vocale."""
+
     def __init__(self, sortie):
         super().__init__(daemon=True)
         self.sortie = sortie
@@ -36,10 +39,10 @@ class Voix(threading.Thread):
         self._arret = threading.Event()
         self._audio = queue.Queue()
         self._declenches = {}       # expression -> occurrences deja traitees dans la phrase
-        self._dates = {}            # expression -> dernier declenchement
+        self._dates = {}            # expression -> timestamp du dernier declenchement
 
     def verifier(self):
-        """Leve RuntimeError avec la marche a suivre si la voix ne peut pas demarrer."""
+        """Verifie la presence des dependances et du modele Vosk."""
         if not os.path.isdir(cfg.MODELE_VOSK):
             raise RuntimeError('modele Vosk introuvable : %s\n'
                                'Lance une fois : python installer.py' % cfg.MODELE_VOSK)
@@ -61,7 +64,7 @@ class Voix(threading.Thread):
         import vosk
         vosk.SetLogLevel(-1)
         modele = vosk.Model(cfg.MODELE_VOSK)
-        # "[unk]" absorbe les sons hors liste.
+        # [unk] permet d'ignorer les bruits et phonemes hors grammaire
         grammaire = json.dumps(list(cfg.MOTS_VOIX) + ['[unk]'])
         reconnaisseur = vosk.KaldiRecognizer(modele, 16000, grammaire)
         with sd.RawInputStream(samplerate=16000, blocksize=4000, dtype='int16',
@@ -82,8 +85,7 @@ class Voix(threading.Thread):
         self._audio.put(bytes(indata))
 
     def _traiter(self, texte, final):
-        """Declenche chaque nouvelle occurrence dans la phrase : les resultats
-        partiels de Vosk s'allongent ("fire", "fire [unk] fire")."""
+        """Analyse le texte et declenche les actions sur les nouveaux mots detectes."""
         vues = collections.Counter()
         for expression in reperer(texte):
             vues[expression] += 1
@@ -95,7 +97,7 @@ class Voix(threading.Thread):
 
     def _declencher(self, expression):
         maintenant = time.monotonic()
-        # Juste apres une action : revision de Vosk, pas une nouvelle demande.
+        # Filtre anti-rebond pour eviter les doubles declenchements
         if maintenant - self._dates.get(expression, 0.0) < cfg.DELAI_VOIX:
             return
         self._dates[expression] = maintenant
@@ -105,6 +107,7 @@ class Voix(threading.Thread):
         self.sortie.pulse(action)
 
     def etat_texte(self):
+        """Etat du module vocal pour la barre d'etat."""
         if self.erreur:
             return 'ARRETEE'
         if not self.pret:

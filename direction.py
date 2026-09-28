@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Le joueur assis : l'angle de la chaise devient la direction du kart.
-
-Il tourne a droite, le kart tourne a droite. Flux du telephone coupe -> direction
-au centre.
-"""
+"""Gestion de la direction du kart a partir de l'angle mesure de la chaise."""
 
 import config_trio as cfg
 from modulation import ToucheModulee, intensite_depuis_angle
@@ -12,15 +8,17 @@ NOM = 'chaise'
 
 
 def consigne_depuis_angle(angle, plancher=0.0):
-    """Angle de la chaise (> 0 = vers la droite) -> STEER -1..+1."""
+    """Convertit l'angle de la chaise en consigne de braquage entre -1 et +1."""
     amplitude = intensite_depuis_angle(angle, cfg.ANGLE_MINI, cfg.ANGLE_MAXI, cfg.COURBE,
                                        plancher)
     if amplitude == 0.0:
-        return 0.0          # pas -0.0, qui s'afficherait STEER:-0.000
+        return 0.0          # evite -0.0 sur les logs
     return amplitude if angle > 0 else -amplitude
 
 
 class Direction:
+    """Associe le capteur de la chaise aux commandes de direction vers STK."""
+
     def __init__(self, sortie, capteur):
         self.sortie = sortie
         self.capteur = capteur
@@ -28,8 +26,7 @@ class Direction:
         self.consigne = 0.0
         self.flux_coupe = False
         self._modulee = ToucheModulee()
-        # En fleches, la plage demarre a la plus petite intensite que la
-        # modulation sait rendre, sinon zone morte fantome.
+        # En mode fleches, on part de la frequence minimale supportee
         self._plancher = self._modulee.appui_minimum / self._modulee.periode_maxi
 
     def mettre_a_jour(self):

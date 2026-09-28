@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Le jeu a trois : le joueur assis braque avec la chaise, la personne debout
-derriere lui regle la vitesse avec ses mains (webcam), un high five entre les
-deux lance un objet, et la voix aussi.
-
-    python trio.py                  chaise + webcam + voix
-    python trio.py --solo           sans personne debout : le kart accelere tout seul
-    python trio.py --chaise         la chaise seule (--webcam, --voix : idem)
-    python trio.py --fleches        si le jeu ignore la manette virtuelle
-    python trio.py --simulation     affiche les commandes sans les envoyer
-    python trio.py --journal partie.csv --duree 180
-
-Le serveur (serveur.py) doit tourner : .\\lancer.ps1 ouvre les deux fenetres.
-Pendant la partie : C recentre la chaise, Q quitte (terminal ou fenetre webcam).
-"""
+"""Programme principal coordonnant les 3 modalites : chaise, webcam et voix."""
 
 import argparse
 import csv
@@ -25,6 +12,7 @@ from sortie_stk import SortieSTK
 
 
 def bip(frequence=880, duree_ms=120):
+    """Signal sonore pour le compte a rebours de calibration."""
     try:
         import winsound
         winsound.Beep(frequence, duree_ms)
@@ -33,7 +21,7 @@ def bip(frequence=880, duree_ms=120):
 
 
 def touche():
-    """Touche pressee dans ce terminal, ou None. Windows seulement."""
+    """Recupere la touche pressee sous Windows sans bloquer."""
     try:
         import msvcrt
     except ImportError:
@@ -44,7 +32,7 @@ def touche():
 
 
 class Journal:
-    """CSV de la partie : une ligne d'etat par tour de boucle, une par commande."""
+    """Enregistrement CSV des metriques et commandes de la session."""
 
     def __init__(self, chemin):
         dossier = os.path.dirname(chemin)
@@ -71,6 +59,8 @@ class Journal:
 
 
 class SortieJournalisee(SortieSTK):
+    """Extension de SortieSTK avec ecriture des commandes dans le fichier CSV."""
+
     def __init__(self, *args, journal=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.journal = journal
@@ -82,7 +72,7 @@ class SortieJournalisee(SortieSTK):
 
 
 def demarrer_chaise(sortie, port):
-    """Ouvre le port, attend le telephone, calibre. Renvoie (capteur, direction) ou (None, None)."""
+    """Initialise l'ecoute OSC du telephone et lance la sequence de calibration."""
     from chaise import CapteurChaise
     from direction import Direction
     from reseau import bandeau_reseau, ips_locales
@@ -103,7 +93,7 @@ def demarrer_chaise(sortie, port):
         print('[chaise] aucune donnee en 30 s : la chaise ne pilotera pas.')
         capteur.arreter()
         return None, None
-    time.sleep(1.0)     # une fenetre pleine pour la frequence
+    time.sleep(1.0)     # attente d'une fenetre complete pour calculer la frequence
     e = capteur.etat()
     print('[chaise] %s detecte (%s), orientation %d Hz, gyro %d Hz.'
           % (e.profil, e.appareil or 'appareil inconnu', e.hz_orientation, e.hz_gyro))
@@ -129,6 +119,7 @@ def demarrer_chaise(sortie, port):
 
 
 def lire_arguments():
+    """Parse les arguments de la ligne de commande."""
     p = argparse.ArgumentParser(description='SuperTuxKart a trois : chaise, webcam, voix.')
     p.add_argument('--chaise', action='store_true', help='la chaise (telephone dessous)')
     p.add_argument('--webcam', action='store_true', help='la personne debout (vitesse)')
@@ -154,6 +145,7 @@ def lire_arguments():
 
 
 def main():
+    """Boucle principale orchestrant les differents modules d'entree."""
     args = lire_arguments()
     if args.micro is not None:
         cfg.MICRO = args.micro
@@ -181,7 +173,7 @@ def main():
     print('Acceleration : %s.' % cfg.ACCELERATION)
     print()
 
-    roles = []          # (nom, objet) : mettre_a_jour / etat_texte / arreter
+    roles = []          # liste des modules actifs (nom, objet)
     capteur = direction = webcam = None
 
     if args.chaise:

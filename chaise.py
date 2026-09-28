@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Le telephone sous la chaise : de combien le joueur assis a-t-il pivote ?
-
-'cap'  : ZIG SIM, rotation relative r = q * conj(q0) autour de la verticale,
-         2 * atan2(r.z, r.w) : juste quel que soit le montage (le quaternion
-         absolu n'a plus de cap ecran vers le bas). MultiSense : ecart de yaw.
-'gyro' : vitesse de rotation autour de la verticale, integree.
-
-    python chaise.py        outil de mesure en direct (C calibrer, Q quitter)
-"""
+"""Module de reception OSC et d'estimation d'angle a partir du smartphone sous la chaise."""
 
 import argparse
 import collections
@@ -21,21 +13,21 @@ import config_trio as cfg
 
 AXES = 'xyz'
 
-ORDRE_QUATERNION = 'xyzw'           # ordre d'envoi de ZIG SIM, w en dernier (mesure)
+ORDRE_QUATERNION = 'xyzw'           # Ordre des composantes quaternion renvoyees par ZIG SIM
 
 
 def ecart_angulaire(a, b):
-    """a - b ramene dans -180..+180."""
+    """Difference angulaire normalisee dans [-180, +180] degres."""
     return (a - b + 180) % 360 - 180
 
 
 def gravite_telephone(q):
-    """Direction de la gravite dans le repere du telephone."""
+    """Vecteur gravite projete dans le repere propre du smartphone."""
     x, y, z, w = (q[1], q[2], q[3], q[0]) if ORDRE_QUATERNION == 'wxyz' else q
     return (-2 * (x * z - w * y), -2 * (y * z + w * x), -(1 - 2 * (x * x + y * y)))
 
 
-# ------------------------------------------------------------------ quaternions
+# Utilitaires de calcul sur quaternions
 
 def _en_xyzw(q):
     if ORDRE_QUATERNION == 'wxyz':
@@ -59,47 +51,44 @@ def _conjugue(q):
 
 
 def rotation_verticale(q, q0):
-    """Degres de rotation autour de la verticale depuis q0 (vers la gauche = +)."""
+    """Angle de rotation relatif autour de la verticale par rapport au quaternion neutre q0."""
     x, y, z, w = _produit(_en_xyzw(q), _conjugue(_en_xyzw(q0)))
     return ecart_angulaire(math.degrees(2 * math.atan2(z, w)), 0.0)
 
 
 def _agitation(vitesses):
-    """Moyenne quadratique : contrairement a l'ecart-type, elle voit aussi une
-    rotation reguliere."""
+    """Valeur quadratique moyenne pour evaluer la stabilite de la rotation."""
     if not vitesses:
         return 0.0
     return math.sqrt(sum(v * v for v in vitesses) / len(vitesses))
 
 
-# ------------------------------------------------------------------------ etat
-
 @dataclass
 class EtatChaise:
-    """Instantane de la chaise. Angles en degres, > 0 = le joueur tourne a droite."""
+    """Structure contenant les donnees de position, calibration et metriques."""
     profil: str = 'auto'
     appareil: str = None
-    recu: bool = False          # au moins un message utile depuis le demarrage
-    frais: bool = False         # dernier message plus recent que SILENCE_MAX
-    age: float = None           # s depuis le dernier message de la methode retenue
+    recu: bool = False          # au moins un paquet utile recu
+    frais: bool = False         # dernier paquet plus recent que SILENCE_MAX
+    age: float = None           # temps ecoule depuis le dernier paquet
     calibre: bool = False
-    angle: float = None         # LA mesure a utiliser (methode retenue)
-    methode: str = ''           # methode effectivement utilisee
+    angle: float = None         # angle retenu selon la methode configuree
+    methode: str = ''           # methode effective
     angle_cap: float = None
     angle_gyro: float = None
-    vitesse: float = 0.0        # deg/s autour de la verticale, biais retire
+    vitesse: float = 0.0        # vitesse angulaire verticale (deg/s) sans biais
     hz_orientation: float = 0.0
     hz_gyro: float = 0.0
-    inclinaison: float = None   # deg entre le telephone et l'horizontale (ZIG SIM)
-    pitch: float = None         # MultiSense, pour information
-    roll: float = None
+    inclinaison: float = None   # inclinaison par rapport a l'horizontale
+    pitch: float = None         # inclinaison avant-arriere
+    roll: float = None          # inclinaison gauche-droite
     gyro_brut: tuple = (0.0, 0.0, 0.0)
     par_axe: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
     par_axe_total: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
 
 
 class CapteurChaise:
-    """Ecoute le telephone ; l'appli est reconnue au premier message."""
+    """Serveur OSC recevant les flux du smartphone (ZIG SIM / MultiSense) et calculant l'angle."""
 
     def __init__(self, port=None, profil='auto', methode=None):
         self.port = port if port is not None else cfg.PORT_OSC_CHAISE
@@ -112,7 +101,7 @@ class CapteurChaise:
         self._verrou = threading.RLock()
         self._osc = None
 
-        # References provisoires (premier message) jusqu'a la calibration.
+        # References initiales pour la calibration
         self._q = None
         self._q0 = None
         self._yaw = None
@@ -127,8 +116,6 @@ class CapteurChaise:
         self._integre0 = 0.0
         self._vitesse = 0.0
         self._par_axe = [0.0, 0.0, 0.0]
-        # Sans signe : c'est lui qui designe l'axe de la chaise, le cumul signe
-        # s'annulant a chaque aller-retour.
         self._par_axe_total = [0.0, 0.0, 0.0]
 
         self._collecte = None
@@ -139,13 +126,11 @@ class CapteurChaise:
         self._dernier_orientation = 0.0
         self._dernier_gyro = 0.0
 
-    # ------------------------------------------------------------ reception
-
     def _sur_message(self, adresse, *valeurs):
         self._recevoir(adresse, valeurs, time.time())
 
     def _recevoir(self, adresse, valeurs, t):
-        """Separe de _sur_message pour rejouer des messages dates."""
+        """Routage et parsing du message OSC recu."""
         if isinstance(adresse, bytes):
             adresse = adresse.decode('utf8', 'replace')
         segments = adresse.strip('/').split('/')
@@ -153,7 +138,7 @@ class CapteurChaise:
             return
         feuille = segments[-1]
 
-        # deviceinfo arrive sans le prefixe /ZIGSIM/.
+        # Detection automatique du format de l'application mobile
         if self.profil == 'auto':
             if segments[0] == 'ZIGSIM' or feuille == 'deviceinfo':
                 self.profil = 'zigsim'
@@ -209,24 +194,23 @@ class CapteurChaise:
             if feuille == cfg.AXE_GYRO_MULTISENSE:
                 self._integrer(list(self._gyro), t)
 
-    # ------------------------------------------------------------- gyroscope
-
     def _facteur_gyro(self):
         return math.degrees(1.0) if cfg.UNITE_GYRO.get(self.profil) == 'rad' else 1.0
 
     def _vitesse_verticale(self, w, biais):
+        """Projection de la vitesse angulaire sur l'axe vertical."""
         d = [w[i] - biais[i] for i in range(3)]
         if self.profil == 'zigsim' and self._q is not None:
-            # projection sur la verticale : independant du montage
             gx, gy, gz = gravite_telephone(self._q)
             brut = -(d[0] * gx + d[1] * gy + d[2] * gz)
         elif self.profil == 'zigsim':
-            brut = d[2]         # sans quaternion : telephone suppose a plat
+            brut = d[2]         # telephone considere a plat si pas de quaternion
         else:
             brut = d[AXES.index(cfg.AXE_GYRO_MULTISENSE)]
         return cfg.SIGNE_GYRO.get(self.profil, 1) * brut * self._facteur_gyro()
 
     def _integrer(self, w, t):
+        """Integration numerique de la vitesse angulaire."""
         self._gyro = list(w)
         self._dates_gyro.append(t)
         if self._collecte is not None:
@@ -235,7 +219,7 @@ class CapteurChaise:
         v = self._vitesse_verticale(w, self._biais)
         if self._t_gyro is not None:
             dt = t - self._t_gyro
-            # au-dela de 0,2 s : trou dans le flux, on n'integre pas a travers
+            # Delai max de 0.2s pour eviter les sauts d'integration en cas de trou de paquet
             if 0.0 < dt < 0.2:
                 self._integre += v * dt
                 facteur = self._facteur_gyro()
@@ -246,8 +230,6 @@ class CapteurChaise:
         self._t_gyro = t
         self._dernier_gyro = t
         self._vitesse = v
-
-    # ---------------------------------------------------------------- angles
 
     def _angle_cap(self):
         if self.profil == 'zigsim':
@@ -267,16 +249,13 @@ class CapteurChaise:
             return None
         return ecart_angulaire(self._integre - self._integre0, 0.0)
 
-    # ----------------------------------------------------------- calibration
-
     def debut_calibration(self):
         with self._verrou:
             self._collecte = []
             self._cap_debut_calibration = self._angle_cap()
 
     def fin_calibration(self):
-        """Fixe le neutre et le biais du gyro, sauf si la chaise a bouge.
-        Renvoie (reussi, explication)."""
+        """Valide le neutre et calcule le biais si le joueur est reste immobile."""
         with self._verrou:
             echantillons, self._collecte = self._collecte or [], None
             if self._q is None and self._yaw is None and not echantillons:
@@ -315,23 +294,23 @@ class CapteurChaise:
         self._par_axe_total = [0.0, 0.0, 0.0]
 
     def recentrer(self):
-        """Neutre = position actuelle, sans collecte : utilisable en course."""
+        """Reinitialise l'orientation neutre sur la position courante."""
         with self._verrou:
             if self._q is None and self._yaw is None and self._t_gyro is None:
                 return False
             self._fixer_neutre()
             return True
 
-    # ------------------------------------------------------------ API publique
-
     def demarrer(self):
+        """Demarre le serveur d'ecoute OSC."""
         from oscpy.server import OSCThreadServer
         self._osc = OSCThreadServer(default_handler=self._sur_message)
         self._osc.listen(address='0.0.0.0', port=self.port, default=True)
         return self
 
     def arreter(self):
-        # terminate avant stop_all, sinon WinError 10038 au Ctrl+C
+        """Arrete le serveur OSC en nettoyant les sockets."""
+        # Terminaison propre avant stop_all pour eviter l'erreur 10038 sous Windows
         if self._osc:
             self._osc.terminate_server()
             self._osc.join_server(timeout=1.0)
@@ -342,6 +321,7 @@ class CapteurChaise:
             self._osc = None
 
     def attendre_donnees(self, delai=30.0):
+        """Bloque jusqu'a la reception des premiers paquets de capteurs."""
         fin = time.time() + delai
         while time.time() < fin:
             if self._dernier_orientation or self._dernier_gyro:
@@ -350,12 +330,12 @@ class CapteurChaise:
         return False
 
     def etat(self, maintenant=None):
+        """Construit et renvoie l'etat complet du capteur."""
         t = time.time() if maintenant is None else maintenant
         with self._verrou:
             cap = self._angle_cap()
             gyro = self._angle_gyro()
 
-            # methode choisie sans donnees (capteur desactive) : on prend l'autre
             methode = self.methode
             angle = cap if methode == 'cap' else gyro
             if angle is None:
@@ -386,10 +366,8 @@ class CapteurChaise:
                 par_axe_total=list(self._par_axe_total))
 
 
-# ----------------------------------------------------------- outil de mesure
-
 def _barre(valeur, largeur=31):
-    """Curseur -1..+1 sur une echelle en texte."""
+    """Affichage d'une jauge textuelle entre -1 et +1."""
     pos = int((max(-1.0, min(1.0, valeur)) + 1) / 2 * (largeur - 1))
     ligne = ['-'] * largeur
     ligne[largeur // 2] = '|'
@@ -400,11 +378,11 @@ def _barre(valeur, largeur=31):
 def _fmt(angle):
     if angle is None:
         return '   -   '
-    return '%+7.1f' % (angle if abs(angle) >= 0.05 else 0.0)   # pas de -0.0
+    return '%+7.1f' % (angle if abs(angle) >= 0.05 else 0.0)
 
 
 def _touche():
-    """Touche pressee dans la console, ou None. Windows seulement."""
+    """Lecture non bloquante d'une touche console (Windows)."""
     try:
         import msvcrt
     except ImportError:
@@ -415,6 +393,7 @@ def _touche():
 
 
 def _mesurer(port, profil, methode):
+    """Outil interactif de test et visualisation du capteur chaise."""
     from reseau import activer_ansi, bandeau_reseau, ips_locales
     activer_ansi()
 
@@ -527,6 +506,7 @@ def _mesurer(port, profil, methode):
 
 
 def main():
+    """Point d'entree CLI pour le banc de test de la chaise."""
     p = argparse.ArgumentParser(description='Outil de mesure du telephone sous la chaise.')
     p.add_argument('-p', '--port', type=int, default=cfg.PORT_OSC_CHAISE)
     p.add_argument('--profil', choices=['auto', 'zigsim', 'multisense'], default='auto')

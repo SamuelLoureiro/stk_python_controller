@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""L'IP du PC a saisir dans l'appli du telephone, avec le nom de la carte reseau
-(les cartes virtuelles VMware / VirtualBox ne recoivent rien du telephone)."""
+"""Utilitaires reseau pour recuperer et afficher l'IP locale pour les capteurs."""
 
 import locale
 import os
@@ -15,9 +14,10 @@ BLANC = '\x1b[0m'
 
 
 def activer_ansi():
+    """Active les sequences d'echappement ANSI sur la console Windows."""
     try:
         import ctypes
-        k = ctypes.windll.kernel32   # AttributeError hors Windows : sans objet
+        k = ctypes.windll.kernel32
         mode = ctypes.c_uint32()
         h = k.GetStdHandle(-11)
         if k.GetConsoleMode(h, ctypes.byref(mode)):
@@ -27,14 +27,14 @@ def activer_ansi():
 
 
 def noms_interfaces():
-    """ip -> nom de la carte reseau, lu dans ipconfig. {} si indisponible."""
+    """Associe les adresses IP aux cartes reseau via ipconfig sous Windows."""
     if os.name != 'nt':
         return {}
     try:
         brut = subprocess.run(['ipconfig'], capture_output=True, timeout=5).stdout
     except (OSError, subprocess.SubprocessError):
         return {}
-    # ipconfig ecrit en page de codes OEM (cp850), pas en ANSI
+    # Encodage OEM de la console Windows
     try:
         texte = brut.decode('oem', 'replace')
     except LookupError:
@@ -59,11 +59,11 @@ def noms_interfaces():
 
 
 def ips_locales():
-    """Les IPv4 de ce PC, celle qui sert a sortir en premier."""
+    """Recupere la liste des adresses IPv4 locales valides."""
     ips = []
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s.connect(('8.8.8.8', 80))      # aucun paquet emis, juste le routage
+        s.connect(('8.8.8.8', 80))      # utilise le routage sans emettre de paquet
         ips.append(s.getsockname()[0])
     except OSError:
         pass
@@ -81,6 +81,7 @@ def ips_locales():
 
 
 def bandeau_reseau(ips, port):
+    """Genere le texte d'aide pour configurer le telephone ou l'Arduino."""
     if not ips:
         return ("%sIP du PC introuvable%s - la relever avec : ipconfig\n"
                 "  Port a saisir dans l'application : %s%d%s"

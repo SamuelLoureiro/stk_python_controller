@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare le dossier et verifie que tout est pret. A lancer une fois.
-
-    pip install -r requirements.txt
-    python installer.py
-
-Verifie les paquets, telecharge les modeles (voix et pose) dans models/, essaie
-la manette virtuelle. Relancable sans risque : ce qui est deja fait est saute.
-"""
+"""Script d'installation et de verification des dependances et modeles ML."""
 
 import importlib
 import os
@@ -38,6 +31,7 @@ def noter(ok, texte):
 
 
 def verifier_paquets():
+    """Verifie la version de Python et les bibliotheques requises."""
     print('1. Python et paquets')
     v = sys.version_info
     noter(v >= (3, 9), 'Python %d.%d (%s)' % (v.major, v.minor, sys.executable))
@@ -55,6 +49,7 @@ def verifier_paquets():
 
 
 def telecharger(nom, url, cible, archive_zip):
+    """Telecharge et extrait un fichier ou modele si absent."""
     if os.path.exists(cible):
         noter(True, '%s deja present' % nom)
         return
@@ -86,6 +81,7 @@ def telecharger(nom, url, cible, archive_zip):
 
 
 def verifier_manette():
+    """Verifie la compatibilite de la manette virtuelle Xbox sous Windows."""
     print()
     print('3. Manette virtuelle (direction analogique)')
     if sys.platform != 'win32':
@@ -93,7 +89,7 @@ def verifier_manette():
         return
     try:
         import vgamepad
-        vgamepad.VX360Gamepad()     # Windows fait le bruit d'un branchement : normal
+        vgamepad.VX360Gamepad()     # Windows emet le son de connexion d'un peripherique
         noter(True, 'manette Xbox 360 virtuelle creee')
     except ImportError:
         noter(False, 'vgamepad absent : pip install -r requirements.txt, ou --fleches')
@@ -103,6 +99,7 @@ def verifier_manette():
 
 
 def verifier_calculs():
+    """Lance les tests unitaires locaux s'ils sont presents."""
     try:
         import faux_chaise
     except ImportError:

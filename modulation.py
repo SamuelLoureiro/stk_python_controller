@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
-"""Braquer un peu avec une touche tout-ou-rien : la fleche est battue en rythme.
-
-Le jeu ne voit pas un appui de moins de 16 ms (une image a 60 fps, mesure) :
-pour braquer moins, on espace les appuis au lieu de les raccourcir.
-"""
+"""Simulation d'une commande proportionnelle via des pulsations clavier."""
 
 import time
 
 
 class ToucheModulee:
-    """Intensite 0..1 -> appuis rythmes."""
+    """Transforme une valeur continue (0 a 1) en trains d'impulsions de touches."""
 
     def __init__(self, periode=0.12, appui_minimum=0.034, periode_maxi=0.45):
-        self.periode = periode                # cycle nominal
-        self.appui_minimum = appui_minimum    # 2 images a 60 fps
-        self.periode_maxi = periode_maxi      # au-dela, l'appui se sent passer
+        self.periode = periode                # cycle de base
+        self.appui_minimum = appui_minimum    # temps mini pour prise en compte par le jeu (~2 frames a 60 fps)
+        self.periode_maxi = periode_maxi      # periode max pour garder un comportement fluide
         self._debut = None
 
     def etat(self, intensite, maintenant=None):
-        """True si la touche doit etre enfoncee a cet instant."""
+        """Determine si la touche doit etre enfoncee a cet instant."""
         if maintenant is None:
             maintenant = time.time()
 
@@ -34,7 +30,7 @@ class ToucheModulee:
         periode = self.periode
 
         if duree_appui < self.appui_minimum:
-            # trop court pour le jeu : appui minimum, cycle etire
+            # Si le pulse est trop court, on maintient la duree mini et on espace le cycle
             duree_appui = self.appui_minimum
             periode = self.appui_minimum / intensite
             if periode > self.periode_maxi:
@@ -50,8 +46,7 @@ class ToucheModulee:
 
 def intensite_depuis_angle(ecart, angle_mini, angle_maxi, courbe=1.0,
                            plancher=0.0):
-    """Angle -> intensite 0..1 : zone morte, puis courbe (> 1 = plus doux au
-    centre), a partir du plancher, la plus petite intensite rendable."""
+    """Calcule l'intensite de braquage (0 a 1) avec zone morte et courbe d'attenuation."""
     amplitude = abs(ecart)
     if amplitude <= angle_mini:
         return 0.0

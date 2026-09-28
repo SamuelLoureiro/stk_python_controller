@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tous les reglages. Les valeurs "SUPPOSE" restent a verifier : chaise.py, webcam.py."""
+"""Parametres et reglages pour le mode trio (ports, seuils, constantes)."""
 
 import os
 
@@ -8,94 +8,76 @@ MODELES = os.path.join(DOSSIER_TRIO, 'models')
 MODELE_VOSK = os.path.join(MODELES, 'vosk-model-small-en-us-0.15')
 MODELE_POSE = os.path.join(MODELES, 'pose_landmarker_lite.task')
 
-# --- Reseau -------------------------------------------------------------
-SERVEUR_STK = ('localhost', 6006)   # serveur.py
-PORT_OSC_CHAISE = 8000              # telephone (ZIG SIM ou MultiSense)
+# Configuration reseau
+SERVEUR_STK = ('localhost', 6006)   # ecoute de serveur.py
+PORT_OSC_CHAISE = 8000              # flux OSC du telephone (ZIG SIM / MultiSense)
 
-# --- Chaise : mesure de l'angle -----------------------------------------
-# 'cap'  : orientation du telephone. Ne derive pas, mais l'acier du verin
-#          peut fausser la boussole.
-# 'gyro' : vitesse integree. Insensible a l'acier, derive lentement.
-# Mesure 2026-09-24 (iPhone 14 Pro, pose sur l'assise) : cap et gyro d'accord
-# a ~1 deg pres sur +-66 deg. A reconfirmer telephone fixe dessous.
+# Mesure de l'angle de la chaise
+# 'cap' = orientation absolue, 'gyro' = vitesse angulaire integree
 METHODE_CHAISE = 'cap'
 
-# Ramene chaque mesure a la convention : angle > 0 = le joueur tourne a droite.
-# ZIG SIM : -1 mesure le 2026-09-24. MultiSense : SUPPOSE (le gyro change de
-# signe si le telephone est retourne).
+# Convention : angle > 0 quand on tourne a droite
 SIGNE_CAP = {'zigsim': -1, 'multisense': +1}
 SIGNE_GYRO = {'zigsim': -1, 'multisense': -1}
 
-AXE_GYRO_MULTISENSE = 'z'           # 'z' si le telephone est a plat
+AXE_GYRO_MULTISENSE = 'z'           # telephone pose a plat
 
-# ZIG SIM : 'rad' mesure. MultiSense : SUPPOSE ; chaise.py affiche gyro/cap,
-# ~57 veut dire 'deg'.
+# Unites du gyroscope selon l'appli mobile utilisee
 UNITE_GYRO = {'zigsim': 'rad', 'multisense': 'rad'}
 
-DUREE_CALIBRATION = 1.5             # s d'immobilite pour le neutre et le biais
-AGITATION_MAX = 3.0                 # deg/s au-dela desquels la calibration est refusee
-SILENCE_MAX = 0.5                   # s sans message du telephone -> direction au centre
+# Calibration et timeouts
+DUREE_CALIBRATION = 1.5             # temps d'attente immobile pour fixer le neutre
+AGITATION_MAX = 3.0                 # seuil deg/s pour refuser la calibration
+SILENCE_MAX = 0.5                   # delai sans paquet avant de recentrer le kart
 
-# --- Chaise : effet sur le kart -----------------------------------------
-# 'analogique' : manette virtuelle (serveur.py). 'fleches' : fleche battue en
-# rythme, avec n'importe quel serveur.
+# Mode de direction vers STK ('analogique' manette virtuelle ou 'fleches' batteur)
 DIRECTION = 'analogique'
 
-ANGLE_MINI = 5.0                    # deg, zone morte
-ANGLE_MAXI = 35.0                   # deg, braquage complet (~80 % de l'angle confortable)
-COURBE = 1.5                        # > 1 : plus doux pres du neutre
+ANGLE_MINI = 5.0                    # zone morte en degres
+ANGLE_MAXI = 35.0                   # braquage maximum
+COURBE = 1.5                        # progression non lineaire (> 1 pour adoucir le centre)
 
-# --- Webcam : la personne debout ----------------------------------------
-# Mains sur la tete = freiner, geste 6-7 = accelerer, et sinon :
-# deux mains levees = accelerer, une seule = freiner, aucune = rien.
-ACCELERATION = 'webcam'             # ou 'automatique' (--solo, --auto)
+# Detection des gestes par webcam (joueur debout)
+ACCELERATION = 'webcam'             # ou 'automatique' pour tester en solo
 CAMERA_INDEX = 0
 CAMERA_LARGEUR = 640
 CAMERA_HAUTEUR = 480
-MIROIR = True                       # affichage seulement
+MIROIR = True                       # retour video en miroir pour le confort
 FENETRE_WEBCAM = True
 
-# SUPPOSE, a regler avec webcam.py. Coordonnees d'image : 0 en haut, 1 en bas.
-LIGNE_DEBOUT = 0.45                 # le nez de la personne debout doit etre au-dessus
-MARGE_MAIN = 0.2                    # poignet au-dessus de l'epaule, en largeurs d'epaules
+# Seuils de visibilite et position (coordonnees normalisees 0..1)
+LIGNE_DEBOUT = 0.45                 # limite pour detecter la tete au-dessus du joueur assis
+MARGE_MAIN = 0.2                    # hauteur mini au-dessus de l'epaule (en largeur d'epaules)
 VISIBILITE_MIN = 0.5
-ATTENTE_GESTE = 0.2                 # s : lever les deux mains passe par "une main"
-ABSENCE_MAX = 0.5                   # s sans personne debout -> tout relache
+ATTENTE_GESTE = 0.2                 # filtrage temporel anti-rebond
+ABSENCE_MAX = 0.5                   # relache les commandes si le joueur n'est plus vu
 
-# Geste 6-7, a regler avec webcam.py ("6-7 d=") : pendant le geste d doit
-# passer nettement de +SEUIL a -SEUIL, au repos rester entre les deux.
-SIXSEPT_SEUIL = 0.15                # largeurs d'epaules ; monter si une main qui bouge suffit
-SIXSEPT_FENETRE = 1.5               # s dans lesquelles on compte les bascules
-SIXSEPT_BASCULES = 3                # bascules necessaires (un aller-retour et demi)
-SIXSEPT_MAINTIEN = 0.6              # s sans bascule -> on n'accelere plus
+# Geste 6-7 (mouvement alternatif des mains pour accelerer)
+SIXSEPT_SEUIL = 0.15                # ecart relatif minimum entre les mains
+SIXSEPT_FENETRE = 1.5               # fenetre glissante d'analyse (secondes)
+SIXSEPT_BASCULES = 3                # nombre d'oscillations demandees
+SIXSEPT_MAINTIEN = 0.6              # persistance apres le dernier mouvement
 
-# Mains sur la tete, a regler avec webcam.py ("tete") : distance de la main la
-# plus eloignee au centre de la tete, en largeurs d'epaules.
-FREIN_DISTANCE_TETE = 0.9           # monter si des mains bien posees ne freinent pas
-VISIBILITE_TETE = 0.3               # une main sur la tete est souvent a moitie cachee
+# Mains sur la tete (geste de frein d'urgence)
+FREIN_DISTANCE_TETE = 0.9           # distance mains-tete en largeurs d'epaules
+VISIBILITE_TETE = 0.3               # seuil reduit car les mains masquent parfois les oreilles
 
-# High five joueur assis / personne debout -> fire. A regler avec webcam.py
-# ("tape") : distance entre les deux mains, en largeurs d'epaules.
-HIGH_FIVE_DISTANCE = 0.5            # monter si un vrai high five n'est pas reconnu
-HIGH_FIVE_REPOS = 1.0               # s minimum entre deux fire
+# High five (contact entre mains du joueur assis et debout pour lancer un objet)
+HIGH_FIVE_DISTANCE = 0.5            # distance de declenchement en largeurs d'epaules
+HIGH_FIVE_REPOS = 1.0               # delai mini entre deux tirs consecutifs
 
-# --- Voix -----------------------------------------------------------------
-# Modele anglais : mots anglais. Une expression de plusieurs mots est
-# reconnue comme un tout.
+# Reconnaissance vocale (Vosk offline)
 MOTS_VOIX = {
     'fire': 'fire',
     'help me': 'rescue',
     'turbo': 'turbo',
 }
-DELAI_VOIX = 0.5                    # s avant qu'une meme expression puisse redeclencher
-MICRO = None                        # numero du micro, None = celui de Windows
+DELAI_VOIX = 0.5                    # temps mort entre deux declenchements identiques
+MICRO = None                        # index du micro (None = defaut systeme)
 
-# --- Arduino (Drift / Derrapagem) -----------------------------------------
-# L'Arduino (drift.ino) envoie P_SKIDDING / R_SKIDDING directement en Wi-Fi UDP
-# sur le port du serveur (6006). Touche 'v' dans SuperTuxKart.
+# Drift externe Arduino
 PORT_ARDUINO_DRIFT = 6006
 
-# --- Affichage ----------------------------------------------------------
+# Frequences de boucle
 PERIODE_BOUCLE = 1 / 60
 PERIODE_ETAT = 0.5
-

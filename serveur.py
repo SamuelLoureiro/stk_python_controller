@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Serveur d'entree : le seul programme qui touche au clavier et a la manette.
-
-    python serveur.py -d          (-d : affiche chaque commande recue)
-
-Recoit sur UDP 6006 le vocabulaire du TP (P_LEFT, R_LEFT, FIRE...) plus
-STEER:<-1..+1>, envoye a l'axe d'une manette Xbox virtuelle.
-Compatible Linux (evdev/pynput) et Windows (vgamepad/keyboard).
-Accepte les connexions locales et reseau (Wi-Fi Arduino).
-
-Lancer SuperTuxKart APRES ce serveur, qui cree la manette.
-
-D'apres STK_input_server.py, Michael ORTEGA, 2018.
-"""
+"""Serveur UDP pour relayer les entrees clavier et la manette virtuelle vers SuperTuxKart."""
 
 import os
 import socket
@@ -28,13 +16,10 @@ BLEU = '\033[94m'
 # Ecoute sur 0.0.0.0 pour accepter a la fois localhost (trio.py) et le Wi-Fi (Arduino)
 ADRESSE = ('0.0.0.0', 6006)
 
-# Un appui de moins de 16 ms n'est jamais vu par le jeu (mesure) : avec le
-# press_and_release d'origine, FIRE, RESCUE et NITRO n'arrivaient pas.
+# Duree minimale d'appui pour que STK enregistre bien les impulsions (FIRE, RESCUE, NITRO)
 MAINTIEN = 0.05
 
-# --------------------------------------------------------------------------
 # Emulation du clavier (multiplateforme Linux / Windows)
-# --------------------------------------------------------------------------
 try:
     from pynput.keyboard import Key, Controller as PynputController
     _pynput_kb = PynputController()
@@ -66,6 +51,7 @@ except ImportError:
 
 
 def appui_bref(touche):
+    """Envoie un appui clavier avec maintien minimum."""
     _press(touche)
     time.sleep(MAINTIEN)
     _release(touche)
@@ -104,11 +90,8 @@ bindings = [
 commandes = [b[0] for b in bindings]
 
 
-# --------------------------------------------------------------------------
-# Direction : manette virtuelle ou repli module
-# --------------------------------------------------------------------------
 class DirectionManetteLinux:
-    """Manette virtuelle Xbox 360 pour Linux via evdev/uinput."""
+    """Emulation de la manette Xbox 360 sous Linux via evdev/uinput."""
 
     def __init__(self):
         from evdev import UInput, AbsInfo, ecodes
@@ -146,7 +129,7 @@ class DirectionManetteLinux:
 
 
 class DirectionManetteWindows:
-    """Manette virtuelle Xbox 360 pour Windows via vgamepad."""
+    """Emulation de la manette Xbox 360 sous Windows via vgamepad."""
 
     def __init__(self):
         import vgamepad
@@ -167,7 +150,7 @@ class DirectionManetteWindows:
 
 
 class DirectionModulee:
-    """Repli sans manette : la fleche est battue en rythme."""
+    """Repli sans manette par pulsation des touches gauche/droite."""
 
     PERIODE = 0.12
     APPUI_MINI = 0.034      # deux images a 60 fps
@@ -225,7 +208,8 @@ class DirectionModulee:
 
 
 def creer_direction():
-    # 1. Essai Linux (evdev)
+    """Instancie le peripherique de direction le plus adapte a l'OS."""
+    # 1. Linux uinput
     if sys.platform.startswith('linux'):
         try:
             return DirectionManetteLinux()
@@ -233,7 +217,7 @@ def creer_direction():
             print(ROUGE + 'Manette Linux uinput impossible' + BLANC + ' : %s' % erreur)
             print('Permission /dev/uinput ? Essaie : sudo chmod 666 /dev/uinput')
 
-    # 2. Essai Windows (vgamepad)
+    # 2. Windows vgamepad
     if sys.platform.startswith('win'):
         try:
             return DirectionManetteWindows()
@@ -247,10 +231,8 @@ def creer_direction():
     return DirectionModulee()
 
 
-# --------------------------------------------------------------------------
-# Point d'entree principal
-# --------------------------------------------------------------------------
 def main():
+    """Boucle d'ecoute UDP et dispatch des actions clavier / joystick."""
     debug = '-d' in sys.argv or '--debug' in sys.argv
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
