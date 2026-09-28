@@ -1,8 +1,6 @@
 """
-voice_module.py — Speech recognition (Vosk) for SuperTuxKart.
-
-Restricted vocabulary: "turbo" -> NITRO, "fire" -> FIRE.
-Sends commands via UDP (send_fn) to STK_input_server_v2.
+Voice control module using Vosk for offline keyword spotting.
+Maps spoken trigger words ("turbo", "fire") to game actions.
 """
 
 import json
@@ -23,7 +21,7 @@ class VoiceWorker(threading.Thread):
         self._send_fn = send_fn
         self._stop_event = threading.Event()
         self._audio_queue = queue.Queue()
-        self._last_trigger_time = {}  # Cooldown per action
+        self._last_trigger_time = {}
 
     def stop(self):
         self._stop_event.set()
@@ -37,6 +35,7 @@ class VoiceWorker(threading.Thread):
         vosk.SetLogLevel(-1)
         model = vosk.Model(config.VOSK_MODEL_PATH)
 
+        # Restrict grammar to only our trigger words so detection stays fast
         grammar_words = list(VOICE_ACTION_MAP.keys()) + ["[unk]"]
         grammar = json.dumps(grammar_words)
         recognizer = vosk.KaldiRecognizer(model, VOICE_SAMPLE_RATE, grammar)

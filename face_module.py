@@ -1,12 +1,6 @@
 """
-face_module.py — Webcam + Mediapipe Face Landmarker for SuperTuxKart.
-
-Detects ONLY:
-  - Raised eyebrows       -> Look Back (continuous: P_LOOKBACK / R_LOOKBACK)
-  - Lateral head tilt     -> Drift     (continuous: P_SKIDDING / R_SKIDDING)
-  - Downward head nod     -> Rescue    (impulse: RESCUE)
-
-Sends commands via UDP (send_fn) to STK_input_server_v2.
+Tracks facial landmarks and head pose using MediaPipe.
+Detects eyebrow raise (look back), head tilt (drift), and head nod (rescue).
 """
 
 import math
@@ -23,19 +17,13 @@ import config
 
 
 def _blendshape_dict(result) -> dict:
-    """Converts raw blendshape output into a {name: score} dict."""
     if not result.face_blendshapes:
         return {}
     return {c.category_name: c.score for c in result.face_blendshapes[0]}
 
 
 def _decompose_head_pose(matrix) -> tuple[float, float, float]:
-    """
-    Decomposes the 4x4 Mediapipe transformation matrix into Euler angles (in degrees):
-      - pitch: rotation around X axis (vertical nod, chin moves down/up)
-      - yaw:   rotation around Y axis (turn left/right)
-      - roll:  rotation around Z axis (lateral tilt, ear towards shoulder)
-    """
+    """Decomposes the 4x4 face transformation matrix into pitch, yaw, roll (degrees)."""
     r = np.array(matrix).reshape(4, 4)[:3, :3]
     angles, _, _, _, _, _ = cv2.RQDecomp3x3(r)
     pitch = float(angles[0])
@@ -45,7 +33,7 @@ def _decompose_head_pose(matrix) -> tuple[float, float, float]:
 
 
 class _NodDetector:
-    """Detects a brief downward head nod: pitch drops past threshold and returns quickly."""
+    """Detects a quick downward nod (pitch dip) returning within max_duration_s."""
 
     def __init__(self, dip_threshold_deg: float, max_duration_s: float):
         self.dip_threshold_deg = dip_threshold_deg
@@ -53,11 +41,9 @@ class _NodDetector:
         self._dip_start = None
 
     def reset(self):
-        """Cancels any ongoing nod detection."""
         self._dip_start = None
 
     def update(self, pitch_deg: float) -> bool:
-        """Returns True at the exact moment a complete nod is detected."""
         now = time.monotonic()
         if pitch_deg < -self.dip_threshold_deg:
             if self._dip_start is None:
@@ -76,9 +62,9 @@ class FaceWorker(threading.Thread):
         super().__init__(daemon=True)
         self._send_fn = send_fn
         self._stop_event = threading.Event()
-        self._lookback_active = False       # State to avoid spamming P_LOOKBACK
-        self._drift_active = False          # State to avoid spamming P_SKIDDING
-        self._last_rescue_time = 0.0        # Cooldown for rescue
+        self._lookback_active = False
+        self._drift_active = False
+        self._last_rescue_time = 0.0
 
     def stop(self):
         self._stop_event.set()
@@ -112,12 +98,10 @@ class FaceWorker(threading.Thread):
                 timestamp_ms = int((time.monotonic() - start_time) * 1000)
                 result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-                # 1. Look Back via eyebrows
                 shapes = _blendshape_dict(result)
                 if shapes:
                     self._process_look_back_eyebrows(shapes)
 
-                # 2. Drift (lateral tilt) and Rescue (vertical nod)
                 pitch, roll = 0.0, 0.0
                 if result.facial_transformation_matrixes:
                     pitch, _, roll = _decompose_head_pose(result.facial_transformation_matrixes[0])
@@ -128,7 +112,7 @@ class FaceWorker(threading.Thread):
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
         finally:
-            # Ensure look_back and drift keys are released upon exit
+            # make sure held keys are released when stopping camera thread
             if self._lookback_active:
                 self._send_fn("R_LOOKBACK")
                 self._lookback_active = False
@@ -140,7 +124,6 @@ class FaceWorker(threading.Thread):
                 cv2.destroyAllWindows()
 
     def _process_look_back_eyebrows(self, shapes: dict):
-        """Detects raised eyebrows -> Look Back."""
         outer = (shapes.get("browOuterUpLeft", 0.0) + shapes.get("browOuterUpRight", 0.0)) / 2.0
         inner = shapes.get("browInnerUp", 0.0)
         brow = max(outer, inner)
@@ -155,14 +138,9 @@ class FaceWorker(threading.Thread):
             print("[face] Look Back DEACTIVATED")
 
     def _process_head_pose(self, pitch: float, roll: float, nod_detector: _NodDetector):
-        """
-        Processes 3D head orientation:
-          - Roll (lateral tilt / ear to shoulder) -> Drift
-          - Pitch (vertical downward nod and return) -> Rescue
-        """
         abs_roll = abs(roll)
 
-        # 1. Drift via lateral tilt
+        # lateral tilt triggers drift
         if abs_roll > config.DRIFT_ROLL_ENGAGE and not self._drift_active:
             self._send_fn("P_SKIDDING")
             self._drift_active = True
@@ -173,8 +151,7 @@ class FaceWorker(threading.Thread):
             self._drift_active = False
             print("[face] Drift DEACTIVATED")
 
-        # 2. Rescue via quick vertical nod
-        # Safety lock: while drifting (head tilted), rescue detection is disabled
+        # safety lockout: don't allow rescue nods while drifting
         if self._drift_active:
             nod_detector.reset()
         else:

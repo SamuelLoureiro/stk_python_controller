@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """
-STK_input_server_v2.py
-
-Central modular input hub for SuperTuxKart.
-Receives UDP commands (port 6006) from multiple interfaces (phone, Arduino,
-voice recognition, camera gestures, etc.).
-
-ARCHITECTURE:
-  - STEERING: Controlled exclusively by virtual wheel (ABS_X of Xbox 360 Controller)
-    via evdev/uinput for smooth, continuous analog steering.
-  - ALL OTHER ACTIONS: Controlled exclusively via keyboard emulation (pynput).
-    The virtual controller never triggers buttons, ensuring zero conflicts.
+Input hub for SuperTuxKart.
+Emulates an Xbox 360 controller via evdev/uinput for analog steering,
+and routes discrete buttons/actions to virtual keyboard presses via pynput.
 """
 
 import sys
@@ -18,9 +10,7 @@ import socket
 import time
 from pynput.keyboard import Key, Controller
 
-###############################################################################
-## Console Colors
-###############################################################################
+# ANSI terminal colors
 GREEN  = '\033[92m'
 WHITE  = '\x1b[0m'
 BLUE   = '\033[94m'
@@ -38,9 +28,7 @@ for arg in sys.argv[1:]:
         print("  -d, --debug   Display telemetry and received commands")
         sys.exit(0)
 
-###############################################################################
-## UDP Server
-###############################################################################
+# UDP socket setup
 ADDRESS = ('0.0.0.0', 6006)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:
@@ -50,18 +38,15 @@ except OSError as e:
     print("Check if another server instance is already running.")
     sys.exit(1)
 
-###############################################################################
-## Virtual Keyboard (pynput) - Handles 100% of actions except steering
-###############################################################################
 keyboard = Controller()
 
 def game_tap(key):
-    """Holds key for 50ms to ensure registration in the STK game loop."""
+    # 50ms hold time so the STK game loop reliably registers the keypress
     keyboard.press(key)
     time.sleep(0.05)
     keyboard.release(key)
 
-# Official keyboard command table (used by Arduino, Phone, etc.)
+# Lookup table for incoming UDP commands to keyboard actions
 bindings = [
     ['UP',           Key.up,        game_tap],
     ['DOWN',         Key.down,      game_tap],
@@ -94,16 +79,12 @@ bindings = [
 
 commands = [b[0] for b in bindings]
 
-###############################################################################
-## Virtual Gamepad (evdev/uinput) - Recognized by SDL2/STK as Xbox 360
-###############################################################################
+# Virtual gamepad setup (Xbox 360 descriptor so SDL2 picks it up out of the box)
 gamepad = None
 
 try:
     from evdev import UInput, AbsInfo, ecodes
 
-    # Declare standard Xbox 360 layout so SDL2 / SuperTuxKart recognizes
-    # the device natively. The script will only manipulate the ABS_X axis (wheel).
     capabilities = {
         ecodes.EV_ABS: [
             (ecodes.ABS_X, AbsInfo(value=0, min=-32767, max=32767, fuzz=16, flat=128, resolution=0)),
@@ -133,16 +114,13 @@ except Exception as e:
     sys.exit(1)
 
 def set_steer(float_val):
-    """Applies continuous analog value (-1.0 to 1.0) to wheel axis ABS_X."""
+    # Scale [-1.0, 1.0] to raw 16-bit signed joystick axis
     if gamepad:
         clamped = max(-1.0, min(1.0, float_val))
         axis_val = int(clamped * 32767)
         gamepad.write(ecodes.EV_ABS, ecodes.ABS_X, axis_val)
         gamepad.syn()
 
-###############################################################################
-## Main Loop
-###############################################################################
 print()
 print("=" * 65)
 print("🎮 STK INPUT SERVER (MODULAR)")
@@ -166,7 +144,7 @@ try:
             stop = True
             break
 
-        # 1. Continuous analog steering command (exclusive to wheel ABS_X)
+        # Analog steering command from steer module
         if data.startswith("STEER:"):
             try:
                 val = float(data.split(":")[1])
@@ -178,7 +156,7 @@ try:
                     print(f"{RED}\t{data} (Invalid STEER value){WHITE}")
             continue
 
-        # 2. All other commands are sent strictly to keyboard
+        # Everything else routes to virtual keyboard
         if data in commands:
             if DEBUG:
                 print(f"{YELLOW}\t{data}{WHITE}")

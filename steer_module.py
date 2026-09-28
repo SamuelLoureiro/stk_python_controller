@@ -1,16 +1,6 @@
 """
-steer_module.py — Analog steering module for SuperTuxKart (via virtual Xbox 360 Controller).
-
-Advanced Proportional Controller:
-- Continuous Analog Axis (virtual gamepad ABS_X)
-- Exponential Sensitivity Curve (x^1.4)
-- Zero-Lag Adaptive Filter
-- Automatic Calibration and Recalibration with 2 Fingers / Terminal
-- Acceleration and Brake via Touchpad (sent as keyboard keys via UDP)
-
-Sends:
-- Steering: "STEER:X.XXXX" (-1.0 to 1.0)
-- Acceleration / Brake: "P_ACCELERATE" / "R_ACCELERATE" and "P_BRAKE" / "R_BRAKE"
+OSC receiver module for smartphone steering and pedal inputs.
+Translates device tilt into continuous analog steering and pad touches into gas/brake.
 """
 
 import sys
@@ -20,62 +10,48 @@ import time
 
 from oscpy.server import OSCThreadServer
 
-# ---------------------------------------------------------------------------
-# Acceleration / Brake Command Table (via Keyboard)
-# ---------------------------------------------------------------------------
 COMMANDS = {
     "ACCELERATE": ("P_ACCELERATE", "R_ACCELERATE"),
     "BRAKE":      ("P_BRAKE",      "R_BRAKE"),
 }
 
-# ---------------------------------------------------------------------------
-# Fine-tuning parameters
-# ---------------------------------------------------------------------------
-DEAD_ZONE           = 4.5    # Neutral tilt dead zone in degrees (straight line stability)
-MAX_STEER_ANGLE     = 30.0   # Max tilt angle for 100% steering
-EXPO_GAMMA          = 1.4    # Exponential curve (1.4: smooth center, aggressive edges)
+# Steering tuning parameters
+DEAD_ZONE           = 4.5    # deadband around center to filter hand tremors
+MAX_STEER_ANGLE     = 30.0   # tilt angle for 100% steering lock
+EXPO_GAMMA          = 1.4    # >1.0 gives finer precision around center
 
-# Steering and calibration
-STEER_SIGN          = 1      # Change to -1 if left/right are inverted
-TOUCH_TIMEOUT       = 0.20   # Seconds without touch message before releasing gas/brake
-RECAL_COOLDOWN      = 0.8    # Minimum seconds between recalibrations
+STEER_SIGN          = 1      # flip to -1 if tilt direction is reversed
+TOUCH_TIMEOUT       = 0.20   # release gas/brake if no touch packet received in this window
+RECAL_COOLDOWN      = 0.8    # debounce between recalibration triggers
 
-DEBUG_STEER         = False  # Display real-time angle and intensity telemetry
-DEBUG_LOGS          = False  # Display sent UDP commands in console
+DEBUG_STEER         = False  # print live steering values to console
+DEBUG_LOGS          = False
 
-# ---------------------------------------------------------------------------
-# Shared State (Thread-Safe)
-# ---------------------------------------------------------------------------
 lock = threading.Lock()
 
-pitch_origin            = None   # Calibrated neutral position
-smoothed_pitch          = None   # Dynamically filtered angle
+pitch_origin            = None   # calibrated neutral pitch angle
+smoothed_pitch          = None
 current_vertical        = None   # "ACCELERATE" | "BRAKE" | None
 last_touch_time         = 0.0
 
-# Two-finger detection
+# 2-finger recalibration tracking
 last_left_touch         = 0.0
 last_right_touch        = 0.0
 last_touch_x            = None
 last_recal_time         = 0.0
 
-# Send function injected by run_all.py
 _send_fn = None
 
 
 def _module_send_command(command: str):
-    """Sends the command using the provided UDP callback."""
     if _send_fn is not None:
         _send_fn(command)
         if DEBUG_LOGS:
             print(f"[steer] Sent: {command}")
 
 
-# ---------------------------------------------------------------------------
-# Helper Functions
-# ---------------------------------------------------------------------------
 def normalize_angle(angle):
-    """Keeps angle difference within (-180, 180]."""
+    # keep angle in (-180, 180] to handle wrap-around
     while angle > 180:
         angle -= 360
     while angle <= -180:
@@ -84,7 +60,7 @@ def normalize_angle(angle):
 
 
 def trigger_recalibrate(reason=""):
-    """Resets the center (steering zero) to current orientation."""
+    """Resets steering neutral to the current phone orientation."""
     global pitch_origin, smoothed_pitch, last_recal_time
     global current_vertical
 
@@ -97,12 +73,12 @@ def trigger_recalibrate(reason=""):
         if smoothed_pitch is not None:
             pitch_origin = smoothed_pitch
 
-        # Temporarily release any active vertical command for safety
+        # drop active pedal during recalibration for safety
         if current_vertical is not None:
             _module_send_command(COMMANDS[current_vertical][1])
             current_vertical = None
 
-    # Recenter analog steering immediately
+    # immediately center the virtual wheel
     _module_send_command("STEER:0.0000")
 
     print("\n" + "=" * 55)
@@ -111,10 +87,8 @@ def trigger_recalibrate(reason=""):
     print("=" * 55 + "\n")
 
 
-# ---------------------------------------------------------------------------
-# Watchdog Thread: Releases Gas / Brake when finger is lifted
-# ---------------------------------------------------------------------------
 def release_watchdog():
+    # releases gas/brake if the phone app stops sending touch updates
     global current_vertical
     while True:
         time.sleep(0.04)
@@ -125,10 +99,8 @@ def release_watchdog():
                     current_vertical = None
 
 
-# ---------------------------------------------------------------------------
-# Thread to recalibrate via Terminal Keyboard (Enter / Space / 'c')
-# ---------------------------------------------------------------------------
 def keyboard_listener_thread():
+    # allows hitting enter in the terminal to recalibrate center
     while True:
         try:
             line = sys.stdin.readline()
@@ -138,9 +110,6 @@ def keyboard_listener_thread():
             break
 
 
-# ---------------------------------------------------------------------------
-# OSC Callbacks (Sensor and Touch Processing)
-# ---------------------------------------------------------------------------
 def on_pitch(*values):
     global pitch_origin, smoothed_pitch
 
@@ -148,7 +117,7 @@ def on_pitch(*values):
         return
     value = float(values[0])
 
-    # Automatic initial calibration on first received value
+    # auto-calibrate on the very first packet received
     if pitch_origin is None:
         pitch_origin   = value
         smoothed_pitch = value
@@ -156,16 +125,14 @@ def on_pitch(*values):
         print("💡 Tip: Tap with 2 fingers on the screen at any time to recalibrate the center.\n")
         return
 
-    # Zero-Lag Adaptive Filter
+    # dynamic smoothing: fast arm movement reduces alpha for instant response
     diff = abs(value - smoothed_pitch)
     adaptive_alpha = min(0.85, max(0.35, 0.35 + (diff / 12.0) * 0.50))
     smoothed_pitch = adaptive_alpha * value + (1.0 - adaptive_alpha) * smoothed_pitch
 
-    # Delta relative to calibrated center
     delta = normalize_angle(smoothed_pitch - pitch_origin) * STEER_SIGN
     adelta = abs(delta)
 
-    # Compute continuous analog value (-1.0 to 1.0)
     if adelta <= DEAD_ZONE:
         steer_value = 0.0
     else:
@@ -173,7 +140,6 @@ def on_pitch(*values):
         intensity = norm ** EXPO_GAMMA
         steer_value = intensity if delta > 0 else -intensity
 
-    # Immediate transmission of continuous value to analog axis ABS_X
     _module_send_command(f"STEER:{steer_value:.4f}")
 
     if DEBUG_STEER:
@@ -189,6 +155,7 @@ def on_pad_x(*values):
     if not values:
         return
 
+    # multiple touch coordinates in a single OSC packet
     if len(values) >= 2:
         trigger_recalibrate("Multi-touch detected (2 fingers)")
         return
@@ -201,6 +168,7 @@ def on_pad_x(*values):
     elif val > 0.2:
         last_right_touch = now
 
+    # detect quick touches on both sides or sudden coordinate jump
     is_bilateral = (abs(last_left_touch - last_right_touch) < 0.12 and
                     (now - min(last_left_touch, last_right_touch)) < 0.25)
     is_jump = (last_touch_x is not None and
@@ -214,6 +182,7 @@ def on_pad_x(*values):
         trigger_recalibrate("2 fingers on screen (left + right)")
         return
 
+    # left side of screen is brake/reverse, right is gas
     new_cmd = None
     if val < -0.15:
         new_cmd = "BRAKE"
@@ -233,23 +202,14 @@ def on_multitouch_event(*values):
     trigger_recalibrate("Multi-touch detected")
 
 
-# ---------------------------------------------------------------------------
-# Module Entry Point
-# ---------------------------------------------------------------------------
 def start_steer(send_fn):
     """
-    Starts the analog steering module.
-
-    Args:
-        send_fn: Callable that receives a string and sends via UDP.
-
-    Returns:
-        stop: Function that safely shuts down threads and OSC server.
+    Initializes OSC listener on port 8000 and starts background worker threads.
+    Returns a stop() function to cleanly tear down threads and sockets.
     """
     global _send_fn
     _send_fn = send_fn
 
-    # Start background threads (watchdog and keyboard listener)
     threading.Thread(target=release_watchdog, daemon=True).start()
     threading.Thread(target=keyboard_listener_thread, daemon=True).start()
 
@@ -283,7 +243,6 @@ def start_steer(send_fn):
             if current_vertical is not None:
                 _module_send_command(COMMANDS[current_vertical][1])
                 current_vertical = None
-        # Recenter analog wheel
         _module_send_command("STEER:0.0000")
         time.sleep(0.05)
         try:

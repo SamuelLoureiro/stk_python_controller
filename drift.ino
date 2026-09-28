@@ -15,8 +15,8 @@
  */
 
 // ================= Network Settings =================
-const char* ssid     = "Rew is gay";         // Network SSID (2.4 GHz)
-const char* password = "samishot";       // Network password
+const char* ssid     = "network name";         // Network SSID (2.4 GHz)
+const char* password = "network password";       // Network password
 
 // IP address of computer running STK_input_server_v2.py
 IPAddress serverIP(172, 16, 11, 223); 

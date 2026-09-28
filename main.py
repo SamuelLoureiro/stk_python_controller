@@ -1,8 +1,6 @@
 """
-Entry point for the legacy module (face + head + voice).
-
-Run this script while SuperTuxKart is open and in foreground.
-Ctrl+C in terminal (or 'q' in debug window) to stop cleanly.
+Legacy runner for direct keyboard control (no UDP server needed).
+Requires SuperTuxKart to be focused in the foreground.
 """
 
 import time

@@ -1,14 +1,6 @@
 """
-run_all.py — Unified runner script for SuperTuxKart controller.
-
-Prerequisites:
-  1. STK_input_server_v2.py running in another terminal: python STK_input_server_v2.py
-  2. SuperTuxKart open and in foreground
-
-Modules executed together:
-  - SteerModule  (phone via OSC)       -> Analog Steering (STEER) + Accelerate/Brake
-  - VoiceModule  (microphone via Vosk) -> Turbo (NITRO) + Fire (FIRE)
-  - FaceModule   (Mediapipe webcam)    -> Eyebrows (LOOK_BACK), Tilt (DRIFT), Nod (RESCUE)
+Unified runner: launches steer, face tracking, and voice input threads.
+Forwards all commands over UDP to STK_input_server_v2.
 """
 
 import socket
@@ -17,23 +9,18 @@ import sys
 
 from config import STK_SERVER_ADDRESS
 
-# ---------------------------------------------------------------------------
-# Shared UDP socket for sending commands to the server
-# ---------------------------------------------------------------------------
+# Reused socket for all outgoing UDP commands
 _udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 
 def send_command(command: str):
-    """Sends a UDP command to STK_input_server_v2."""
+    """Sends a UDP command packet to the server."""
     try:
         _udp_socket.sendto(command.encode('utf8'), STK_SERVER_ADDRESS)
     except Exception as e:
         print(f"[run_all] Error sending command '{command}': {e}")
 
 
-# ---------------------------------------------------------------------------
-# Controller module imports
-# ---------------------------------------------------------------------------
 from steer_module import start_steer
 from face_module import FaceWorker
 from voice_module import VoiceWorker
@@ -53,21 +40,19 @@ def main():
     print("=" * 65)
     print()
 
-    # 1. Start Steer (Phone OSC -> Analog Axis ABS_X)
+    # Spin up input workers
     steer_stop = start_steer(send_command)
 
-    # 2. Start Face (Webcam -> Look Back + Drift + Rescue)
     face_worker = FaceWorker(send_command)
     face_worker.start()
 
-    # 3. Start Voice (Microphone -> Turbo + Fire)
     voice_worker = VoiceWorker(send_command)
     voice_worker.start()
 
     print(">>> All modules started successfully! <<<\n")
 
     try:
-        # Main loop monitoring threads
+        # Keep main thread alive while workers run
         while face_worker.is_alive():
             time.sleep(0.5)
     except KeyboardInterrupt:
@@ -81,7 +66,7 @@ def main():
         face_worker.join(timeout=2.0)
         voice_worker.join(timeout=2.0)
 
-        # Ensure all keys are released and analog wheel is centered
+        # Center wheel and drop any held keys so the kart doesn't keep moving
         print("[run_all] Centering steering wheel and releasing active keys...")
         send_command("STEER:0.0000")
         for cmd in ["R_ACCELERATE", "R_BRAKE", "R_LOOKBACK", "R_SKIDDING"]:
